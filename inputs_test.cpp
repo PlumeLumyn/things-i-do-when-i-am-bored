@@ -314,43 +314,49 @@ int main(void) {
         FAR_CLIP);
 
     Mat4f vpMatrix = MatMul(projectionMatrix, viewMatrix);
-    Identity(modelMatrix);
-    modelMatrix[0][0] *= 20.0f;
-    modelMatrix[1][1] *= 2.0f;
-    modelMatrix[2][2] *= 20.0f;
-    Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
-    for (size_t k = 0; k < cube.size() / 3; k++) {
-      std::array<Vertex, 3> vertexData;
-      vertexData[0]     = cube[k * 3];
-      vertexData[1]     = cube[k * 3 + 1];
-      vertexData[2]     = cube[k * 3 + 2];
-      Mat3f viewMatrix3 = {
-        viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0],
-        viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1],
-        viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]
-      };
-      Vec3f lightDir;
-      MatrixVectorMult(viewMatrix3, { 0.0f, 0.0f, 1.0f }, lightDir);
-      float light = DotProduct(Normalize(vertexData[0].normal), Normalize(lightDir));
-      if (light >= 0)
-        drawTriangle(
-            sController.getWindow(windowId),
-            vertexData,
-            transformMatrix,
-            [light](Vertex v) {
-              int texX = static_cast<int>(v.uv[0] * (cobblestoneTexture.width - 1));
-              int texY = static_cast<int>(v.uv[1] * (cobblestoneTexture.height - 1));
-              int texIndex =
-                  (texY * cobblestoneTexture.width + texX) * cobblestoneTexture.channels;
-              Vec3f fragColor = {
-                cobblestoneTexture.data[texIndex] / 255.0f,
-                cobblestoneTexture.data[texIndex + 1] / 255.0f,
-                cobblestoneTexture.data[texIndex + 2] / 255.0f
-              };
-              fragColor *= v.pos[2] * (3.0f + light * 3.0f);
-              return fragColor;
-            }); // base color
-    }
+    for (int i = -10; i <= 10; i++)
+      for (int j = -10; j <= 10; j++) {
+        Identity(modelMatrix);
+        modelMatrix[0][0] *= 2.0f;
+        modelMatrix[1][1] *= 2.0f;
+        modelMatrix[2][2] *= 2.0f;
+        modelMatrix[0][3] += i;
+        modelMatrix[2][3] += j;
+        Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
+        for (size_t k = 0; k < cube.size() / 3; k++) {
+          std::array<Vertex, 3> vertexData;
+          vertexData[0]     = cube[k * 3];
+          vertexData[1]     = cube[k * 3 + 1];
+          vertexData[2]     = cube[k * 3 + 2];
+          Mat3f viewMatrix3 = {
+            viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0],
+            viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1],
+            viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]
+          };
+          Vec3f lightDir;
+          MatrixVectorMult(viewMatrix3, { 0.0f, 0.0f, 1.0f }, lightDir);
+          float light = DotProduct(Normalize(vertexData[0].normal), Normalize(lightDir));
+          if (light >= 0)
+            drawTriangle(
+                sController.getWindow(windowId),
+                vertexData,
+                transformMatrix,
+                [light](Vertex v) {
+                  int texX = static_cast<int>(v.uv[0] * (cobblestoneTexture.width - 1));
+                  int texY = static_cast<int>(v.uv[1] * (cobblestoneTexture.height - 1));
+                  int texIndex =
+                      (texY * cobblestoneTexture.width + texX) *
+                      cobblestoneTexture.channels;
+                  Vec3f fragColor = {
+                    cobblestoneTexture.data[texIndex] / 255.0f,
+                    cobblestoneTexture.data[texIndex + 1] / 255.0f,
+                    cobblestoneTexture.data[texIndex + 2] / 255.0f
+                  };
+                  fragColor *= v.pos[2] * (3.0f + light * 3.0f);
+                  return fragColor;
+                }); // base color
+        }
+      }
     // Calcul du FPS (mise à jour chaque seconde)
     frameCount++;
     auto now     = std::chrono::steady_clock::now();
