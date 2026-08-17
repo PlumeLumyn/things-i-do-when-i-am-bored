@@ -1,6 +1,7 @@
 #include "screen.hpp"
 #include <cstddef>
 #include <functional>
+#include <memory>
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 #include "vec.hpp"
@@ -26,7 +27,29 @@ struct Image {
     unsigned char *data;
 };
 
-Image cobblestoneTexture;
+struct Block {
+    int id = 0;
+    int x, y, z;
+    Block(int id, int x, int y, int z) : id(id), x(x), y(y), z(z) {};
+};
+
+Image loadTexture(const std::string &path) {
+  Image tex;
+  int texWidth, texHeight, texChannels;
+  unsigned char *data = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, 0);
+  if (!data) {
+    std::cerr << "Failed to load texture: ./cobblestone.png" << std::endl;
+    return { 0, 0, 0, nullptr };
+  }
+  tex.width    = texWidth;
+  tex.height   = texHeight;
+  tex.channels = texChannels;
+  tex.data     = data;
+  return tex;
+}
+
+const std::array<Image, 1> textures = { loadTexture("./cobblestone.png") };
+std::vector<Block> blocks;
 
 void drawLine(Screen::Window &w, Vec4f o, Vec4f d, Vec3f col = { 1.0, 1.0, 1.0 }) {
   Vec2i oi = ToScreenCoords(o, w.getWidth(), w.getSubPixelHeight());
@@ -93,7 +116,7 @@ void drawTriangle(
 
   float invDenom = 1.0f / denom;
 
-  std::array<float, 3> invW, z;
+  Vec3f invW, z;
   std::array<Vec2f, 3> uv_w;
   std::array<Vec3f, 3> normal_w;
   Vertex v;
@@ -125,7 +148,7 @@ void drawTriangle(
 
   for (int y = minY; y <= maxY; ++y) {
     for (int x = minX; x <= maxX; ++x) {
-      std::array<float, 3> w;
+      Vec3f w;
       w[0] = ((p1[1] - p2[1]) * (x - p2[0]) + (p2[0] - p1[0]) * (y - p2[1])) * invDenom;
       w[1] = ((p2[1] - p0[1]) * (x - p2[0]) + (p0[0] - p2[0]) * (y - p2[1])) * invDenom;
       w[2] = 1.0f - w[0] - w[1];
@@ -137,7 +160,7 @@ void drawTriangle(
       float localZ    = w[0] * z[0] + w[1] * z[1] + w[2] * z[2];
       float localInvW = w[0] * invW[0] + w[1] * invW[1] + w[2] * invW[2];
 
-      // Perspective-correct UV interpolation
+      // // Perspective-correct UV interpolation
       v.pos = { static_cast<float>(x), static_cast<float>(y), localZ };
       v.uv  = (w[0] * uv_w[0] + w[1] * uv_w[1] + w[2] * uv_w[2]) / localInvW;
       v.normal =
@@ -157,18 +180,10 @@ int main(void) {
   Inputs::InputController iController;
   Screen::ScreenController sController;
 
-  // Load ./cobblestone.png in a matrix with stb image
-  int texWidth, texHeight, texChannels;
-  unsigned char *data =
-      stbi_load("./cobblestone.png", &texWidth, &texHeight, &texChannels, 0);
-  if (!data) {
-    std::cerr << "Failed to load texture: ./cobblestone.png" << std::endl;
-    return -1;
-  }
-  cobblestoneTexture.width    = texWidth;
-  cobblestoneTexture.height   = texHeight;
-  cobblestoneTexture.channels = texChannels;
-  cobblestoneTexture.data     = data;
+  for (int i = -10; i <= 10; i++)
+    for (int j = -10; j <= 10; j++) {
+      blocks.emplace_back(0, i, 0, j);
+    }
 
   // All triangles of the cube (two per face so 12*3 = 36 vertices)
   // Format: x, y, z, nx, ny, nz, u, v
@@ -224,10 +239,11 @@ int main(void) {
   };
   // clang-format on
 
-  Vec3f camera      = { 0.0, 0.0, 5.0 };
-  Vec3f cameraAngle = { 0.0, 0.0, 0.0 };
-  Vec3f vel         = { 0.0, 0.0, 0.0 };
-  Vec3f gravity     = { 0.0, -0.05, 0.0 };
+  Vec3f camera       = { 0.0, 0.0, 5.0 };
+  Vec3f cameraAngle  = { 0.0, 0.0, 0.0 };
+  Vec3f vel          = { 0.0, 0.0, 0.0 };
+  Vec3f gravity      = { 0.0, -0.05, 0.0 };
+  Vec2i lastMousePos = { -1, -1 };
   Mat4f viewMatrix;
   Identity(viewMatrix);
   Mat4f projectionMatrix;
@@ -260,12 +276,21 @@ int main(void) {
       vel[2] += 0.05 * -sin(cameraAngle[1]);
       vel[0] += 0.05 * cos(cameraAngle[1]);
     }
-    if (iController.isPressed(Inputs::Keycode::A)) {
-      cameraAngle[1] += 0.05;
+    if (iController.isJustPressed(Inputs::Keycode::MouseLeft)) {
+      blocks.pop_back();
     }
-    if (iController.isPressed(Inputs::Keycode::E)) {
-      cameraAngle[1] -= 0.05;
+    if (iController.isJustPressed(Inputs::Keycode::MouseRight)) {
+      blocks.emplace_back(0, 0, 2, 0);
     }
+    if (lastMousePos[0] != -1) {
+      int xMove = iController.getMousePos()[0] - lastMousePos[0];
+      int yMove = iController.getMousePos()[1] - lastMousePos[1];
+      cameraAngle[1] += static_cast<float>(-xMove) / 100.0f;
+      cameraAngle[0] += static_cast<float>(-yMove) / 100.0f;
+      if (cameraAngle[0] < -1.57) cameraAngle[0] = -1.57;
+      if (cameraAngle[0] > 1.57) cameraAngle[0] = 1.57;
+    }
+    lastMousePos = iController.getMousePos();
     if (iController.isPressed(Inputs::Keycode::Space)) {
       vel[1] += 0.5 - vel[1] * 2.0;
     }
@@ -314,49 +339,55 @@ int main(void) {
         FAR_CLIP);
 
     Mat4f vpMatrix = MatMul(projectionMatrix, viewMatrix);
-    for (int i = -10; i <= 10; i++)
-      for (int j = -10; j <= 10; j++) {
-        Identity(modelMatrix);
-        modelMatrix[0][0] *= 2.0f;
-        modelMatrix[1][1] *= 2.0f;
-        modelMatrix[2][2] *= 2.0f;
-        modelMatrix[0][3] += i;
-        modelMatrix[2][3] += j;
-        Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
-        for (size_t k = 0; k < cube.size() / 3; k++) {
-          std::array<Vertex, 3> vertexData;
-          vertexData[0]     = cube[k * 3];
-          vertexData[1]     = cube[k * 3 + 1];
-          vertexData[2]     = cube[k * 3 + 2];
-          Mat3f viewMatrix3 = {
-            viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0],
-            viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1],
-            viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]
-          };
-          Vec3f lightDir;
-          MatrixVectorMult(viewMatrix3, { 0.0f, 0.0f, 1.0f }, lightDir);
-          float light = DotProduct(Normalize(vertexData[0].normal), Normalize(lightDir));
-          if (light >= 0)
-            drawTriangle(
-                sController.getWindow(windowId),
-                vertexData,
-                transformMatrix,
-                [light](Vertex v) {
-                  int texX = static_cast<int>(v.uv[0] * (cobblestoneTexture.width - 1));
-                  int texY = static_cast<int>(v.uv[1] * (cobblestoneTexture.height - 1));
-                  int texIndex =
-                      (texY * cobblestoneTexture.width + texX) *
-                      cobblestoneTexture.channels;
-                  Vec3f fragColor = {
-                    cobblestoneTexture.data[texIndex] / 255.0f,
-                    cobblestoneTexture.data[texIndex + 1] / 255.0f,
-                    cobblestoneTexture.data[texIndex + 2] / 255.0f
-                  };
-                  fragColor *= v.pos[2] * (3.0f + light * 3.0f);
-                  return fragColor;
-                }); // base color
-        }
+    Identity(modelMatrix);
+    modelMatrix[0][0] *= 2.0f;
+    modelMatrix[1][1] *= 2.0f;
+    modelMatrix[2][2] *= 2.0f;
+    for (const auto &block : blocks) {
+      modelMatrix[0][3]     = block.x * 2;
+      modelMatrix[1][3]     = block.y * 2;
+      modelMatrix[2][3]     = block.z * 2;
+      Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
+      for (size_t k = 0; k < cube.size() / 3; k++) {
+        std::array<Vertex, 3> vertexData;
+        vertexData[0]     = cube[k * 3];
+        vertexData[1]     = cube[k * 3 + 1];
+        vertexData[2]     = cube[k * 3 + 2];
+        Mat3f viewMatrix3 = {
+          viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0],
+          viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1],
+          viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]
+        };
+        Vec3f lightDir;
+        MatrixVectorMult(viewMatrix3, { 0.0f, 0.0f, 1.0f }, lightDir);
+        float light = DotProduct(Normalize(vertexData[0].normal), Normalize(lightDir));
+        if (1)
+          drawTriangle(
+              sController.getWindow(windowId),
+              vertexData,
+              transformMatrix,
+              [light, &block](Vertex v) {
+                const Image &tex = textures[block.id];
+                int texX     = static_cast<int>(v.uv[0] * (tex.width - 1)) % tex.width;
+                int texY     = static_cast<int>(v.uv[1] * (tex.height - 1)) % tex.height;
+                int texIndex = (texY * tex.width + texX) * tex.channels;
+                Vec3f fragColor = {
+                  tex.data[texIndex] / 255.0f,
+                  tex.data[texIndex + 1] / 255.0f,
+                  tex.data[texIndex + 2] / 255.0f
+                };
+                fragColor *= (v.pos[2]) * (1.0f + light);
+                if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
+                if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
+                if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
+                if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
+                if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
+                if (fragColor[2] < 0.0f) fragColor[2] = 0.0f;
+
+                return fragColor;
+              }); // base color
       }
+    }
     // Calcul du FPS (mise à jour chaque seconde)
     frameCount++;
     auto now     = std::chrono::steady_clock::now();
