@@ -63,6 +63,16 @@ T DotProduct(const Vec<T, H> &x, const Vec<T, H> &y) {
 }
 
 template <typename T, size_t H>
+T Magnitude(const Vec<T, H> &v) {
+  return std::sqrt(DotProduct(v, v));
+}
+
+template <typename T, size_t H>
+T Magnitude2(const Vec<T, H> &v) {
+  return DotProduct(v, v);
+}
+
+template <typename T, size_t H>
 Vec<T, H> Normalize(const Vec<T, H> &v) {
   T len = std::sqrt(DotProduct(v, v));
   Vec<T, H> res;
@@ -133,7 +143,7 @@ inline Vec<T, H> Negative(Vec<T, H> vec) {
   return vec;
 }
 
-inline Mat4f BuildViewMatrix(Vec3f &cp, Vec3f &ca) {
+inline Mat4f BuildViewMatrix(const Vec3f cp, const Vec3f ca) {
   const float cosx = std::cos(ca[0]);
   const float cosy = std::cos(ca[1]);
   const float cosz = std::cos(ca[2]);
@@ -234,7 +244,7 @@ Vec<T, N> operator/(const Vec<T, N> &v, T scalar) {
 
 // Addition: vec + vec
 template <typename T, size_t N>
-Vec<T, N> operator+(const Vec<T, N> &a, const Vec<T, N> &b) {
+const Vec<T, N> operator+(const Vec<T, N> &a, const Vec<T, N> &b) {
   Vec<T, N> result;
   for (size_t i = 0; i < N; ++i)
     result[i] = a[i] + b[i];

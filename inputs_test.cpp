@@ -1,6 +1,8 @@
 #include "screen.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <memory>
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -29,8 +31,16 @@ struct Image {
 
 struct Block {
     int id = 0;
-    int x, y, z;
-    Block(int id, int x, int y, int z) : id(id), x(x), y(y), z(z) {};
+    Vec3f position;
+    Block(int id, Vec3f position) : id(id), position(position) {};
+
+    bool operator==(const Block &o) {
+      return id == o.id && position == o.position;
+    }
+
+    bool operator>(const Block &o) {
+      return id > o.id && position > o.position;
+    }
 };
 
 Image loadTexture(const std::string &path) {
@@ -50,6 +60,72 @@ Image loadTexture(const std::string &path) {
 
 const std::array<Image, 1> textures = { loadTexture("./cobblestone.png") };
 std::vector<Block> blocks;
+
+bool rayIntersectsBox(Vec3f origin, Vec3f dir, Vec3f boxMin, Vec3f boxMax) {
+  float tMin = -std::numeric_limits<float>::infinity();
+  float tMax = std::numeric_limits<float>::infinity();
+
+  for (size_t i = 0; i <= 2; i++) {
+    // iterate X, Y, Z axes
+    if (dir[i] == 0) {
+      if (origin[i] < boxMin[i] || origin[i] > boxMax[i]) {
+        return false;
+      }
+    } else {
+      float t1 = (boxMin[i] - origin[i]) / dir[i];
+      float t2 = (boxMax[i] - origin[i]) / dir[i];
+
+      float tEnter = std::min(t1, t2);
+      float tLeave = std::max(t1, t2);
+
+      tMin = std::max(tMin, tEnter);
+      tMax = std::min(tMax, tLeave);
+
+      if (tMin > tMax || tMax < 0) return false;
+    }
+  }
+  return true;
+}
+
+Vec3f getIntersectionPoint(Vec3f rayOrigin, Vec3f rayDir, Vec3f boxMin, Vec3f boxMax) {
+  float tMin = 0.0f;
+  float tMax = std::numeric_limits<float>::infinity();
+
+  // For each axis (X, Y, Z)
+  for (int i = 0; i < 3; i++) {
+    float origin = ((float *)&rayOrigin)[i];
+    float dir    = ((float *)&rayDir)[i];
+    float bMin   = ((float *)&boxMin)[i];
+    float bMax   = ((float *)&boxMax)[i];
+
+    if (abs(dir) < 1e-8f) {
+      // Ray is parallel to the slab
+      if (origin < bMin || origin > bMax) {
+        return rayOrigin; // No intersection
+      }
+    } else {
+      // Compute intersection t values
+      float t1 = (bMin - origin) / dir;
+      float t2 = (bMax - origin) / dir;
+
+      if (t1 > t2) {
+        float temp = t1;
+        t1         = t2;
+        t2         = temp;
+      }
+
+      tMin = fmax(tMin, t1);
+      tMax = fmin(tMax, t2);
+
+      if (tMin > tMax) {
+        return rayOrigin; // No intersection
+      }
+    }
+  }
+
+  // Return the intersection point at tMin (entry point)
+  return rayOrigin + rayDir * tMin;
+}
 
 void drawLine(Screen::Window &w, Vec4f o, Vec4f d, Vec3f col = { 1.0, 1.0, 1.0 }) {
   Vec2i oi = ToScreenCoords(o, w.getWidth(), w.getSubPixelHeight());
@@ -182,7 +258,7 @@ int main(void) {
 
   for (int i = -10; i <= 10; i++)
     for (int j = -10; j <= 10; j++) {
-      blocks.emplace_back(0, i, 0, j);
+      blocks.emplace_back(0, Vec3f { static_cast<float>(i), 0, static_cast<float>(j) });
     }
 
   // All triangles of the cube (two per face so 12*3 = 36 vertices)
@@ -239,10 +315,11 @@ int main(void) {
   };
   // clang-format on
 
-  Vec3f camera       = { 0.0, 0.0, 5.0 };
+  Vec3f camera       = { 0.0f, 0.0f, 0.0f };
+  Vec3f pos          = { 0.0f, 0.5f, 0.0f };
   Vec3f cameraAngle  = { 0.0, 0.0, 0.0 };
   Vec3f vel          = { 0.0, 0.0, 0.0 };
-  Vec3f gravity      = { 0.0, -0.05, 0.0 };
+  Vec3f gravity      = { 0.0, -0.04f, 0.0 };
   Vec2i lastMousePos = { -1, -1 };
   Mat4f viewMatrix;
   Identity(viewMatrix);
@@ -256,31 +333,40 @@ int main(void) {
   float fps          = 0.0f;
   auto lastFpsUpdate = std::chrono::steady_clock::now();
   int frameCount     = 0;
+  bool canJump       = true;
 
   while (1) {
     auto frameStart = std::chrono::steady_clock::now();
 
+    float SPEED = 0.04f;
+    camera[1]   = 1.5f;
+    if (iController.isPressed(Inputs::Keycode::C)) {
+      SPEED     = 0.01f;
+      camera[1] = 1.3f;
+    }
     if (iController.isPressed(Inputs::Keycode::Z)) {
-      vel[2] -= 0.05 * cos(cameraAngle[1]);
-      vel[0] -= 0.05 * sin(cameraAngle[1]);
+      vel[2] -= SPEED * cos(cameraAngle[1]);
+      vel[0] -= SPEED * sin(cameraAngle[1]);
     }
     if (iController.isPressed(Inputs::Keycode::S)) {
-      vel[2] += 0.05 * cos(cameraAngle[1]);
-      vel[0] += 0.05 * sin(cameraAngle[1]);
+      vel[2] += SPEED * cos(cameraAngle[1]);
+      vel[0] += SPEED * sin(cameraAngle[1]);
     }
     if (iController.isPressed(Inputs::Keycode::Q)) {
-      vel[2] -= 0.05 * -sin(cameraAngle[1]);
-      vel[0] -= 0.05 * cos(cameraAngle[1]);
+      vel[2] -= SPEED * -sin(cameraAngle[1]);
+      vel[0] -= SPEED * cos(cameraAngle[1]);
     }
     if (iController.isPressed(Inputs::Keycode::D)) {
-      vel[2] += 0.05 * -sin(cameraAngle[1]);
-      vel[0] += 0.05 * cos(cameraAngle[1]);
+      vel[2] += SPEED * -sin(cameraAngle[1]);
+      vel[0] += SPEED * cos(cameraAngle[1]);
     }
+    bool actBreak = false;
+    bool actPlace = false;
     if (iController.isJustPressed(Inputs::Keycode::MouseLeft)) {
-      blocks.pop_back();
+      actBreak = true;
     }
     if (iController.isJustPressed(Inputs::Keycode::MouseRight)) {
-      blocks.emplace_back(0, 0, 2, 0);
+      actPlace = true;
     }
     if (lastMousePos[0] != -1) {
       int xMove = iController.getMousePos()[0] - lastMousePos[0];
@@ -292,44 +378,37 @@ int main(void) {
     }
     lastMousePos = iController.getMousePos();
     if (iController.isPressed(Inputs::Keycode::Space)) {
-      vel[1] += 0.5 - vel[1] * 2.0;
-    }
-    if (iController.isPressed(Inputs::Keycode::LeftShift)) {
-      vel[1] = -0.5;
+      if (canJump) {
+        vel[1]  = 0.4f;
+        canJump = false;
+      }
+      vel[1] += 0.03f;
     }
     // if (iController.isJustPressed(Inputs::Keycode::Space)) {
     //   reversedGravity = !reversedGravity;
     // }
     iController.refresh();
 
-    if (reversedGravity) {
-      cameraAngle[2] += (3.1415 - cameraAngle[2]) / 2.0;
-      gravity[1] += (0.05 - gravity[1]) / 2.0;
-    } else {
-      cameraAngle[2] += (0 - cameraAngle[2]) / 2.0;
-      gravity[1] += (-0.05 - gravity[1]) / 2.0;
-    }
-
     vel[1] += gravity[1];
-    camera[0] += vel[0];
-    camera[1] += vel[1];
-    camera[2] += vel[2];
+    pos[0] += vel[0];
+    pos[1] += vel[1];
+    pos[2] += vel[2];
 
-    vel[0] *= 0.8;
-    vel[1] *= 0.8;
-    vel[2] *= 0.8;
+    vel[0] *= 0.8f;
+    vel[1] *= 0.8f;
+    vel[2] *= 0.8f;
 
-    if (camera[1] < 5.0) {
-      vel[1]    = 0.0;
-      camera[1] = 5.0;
-    }
+    // if (pos[1] < 0.5f) {
+    //   vel[1] = 0.0f;
+    //   pos[1] = 0.5f;
+    // }
 
     size_t windowId = sController.createWindow(0, 0, 0, 0);
     sController.getWindow(windowId).clear();
     const float NEAR_CLIP = 0.01;
     const float FAR_CLIP  = 20.0;
 
-    viewMatrix       = BuildViewMatrix(camera, cameraAngle);
+    viewMatrix       = BuildViewMatrix(pos + camera, cameraAngle);
     float fovY       = 90.0f * (M_PI / 180.0f); // 30 degrees in radians
     projectionMatrix = BuildProjectionMatrix(
         fovY,
@@ -339,28 +418,69 @@ int main(void) {
         FAR_CLIP);
 
     Mat4f vpMatrix = MatMul(projectionMatrix, viewMatrix);
+
+    Mat3f viewMatrix3 = {
+      viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0],
+      viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1],
+      viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]
+    };
+    Vec3f lightDir;
+    MatrixVectorMult(viewMatrix3, { 0.0f, 0.0f, 1.0f }, lightDir);
+
     Identity(modelMatrix);
-    modelMatrix[0][0] *= 2.0f;
-    modelMatrix[1][1] *= 2.0f;
-    modelMatrix[2][2] *= 2.0f;
+    const Block *closestBlock = nullptr;
     for (const auto &block : blocks) {
-      modelMatrix[0][3]     = block.x * 2;
-      modelMatrix[1][3]     = block.y * 2;
-      modelMatrix[2][3]     = block.z * 2;
+      modelMatrix[0][3]     = block.position[0];
+      modelMatrix[1][3]     = block.position[1];
+      modelMatrix[2][3]     = block.position[2];
       Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
       for (size_t k = 0; k < cube.size() / 3; k++) {
         std::array<Vertex, 3> vertexData;
-        vertexData[0]     = cube[k * 3];
-        vertexData[1]     = cube[k * 3 + 1];
-        vertexData[2]     = cube[k * 3 + 2];
-        Mat3f viewMatrix3 = {
-          viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0],
-          viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1],
-          viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]
-        };
-        Vec3f lightDir;
-        MatrixVectorMult(viewMatrix3, { 0.0f, 0.0f, 1.0f }, lightDir);
+        vertexData[0] = cube[k * 3];
+        vertexData[1] = cube[k * 3 + 1];
+        vertexData[2] = cube[k * 3 + 2];
+        Vec3f blockP1 = block.position - Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f blockP2 = block.position + Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f posP1   = pos - Vec3f { 0.3f, 0.0f, 0.3f };
+        Vec3f posP2   = pos + Vec3f { 0.3f, 1.9f, 0.3f };
+        if (posP1[0] <= blockP2[0] && posP1[1] <= blockP2[1] && posP1[2] <= blockP2[2] &&
+            posP2[0] >= blockP1[0] && posP2[1] >= blockP1[1] && posP2[2] >= blockP1[2]) {
+          // Calculate overlap on each axis
+          float overlapX = std::min(posP2[0] - blockP1[0], blockP2[0] - posP1[0]);
+          float overlapY = std::min(posP2[1] - blockP1[1], blockP2[1] - posP1[1]);
+          float overlapZ = std::min(posP2[2] - blockP1[2], blockP2[2] - posP1[2]);
+
+          float restitution = 0.1;
+
+          // Find the axis with minimum overlap (that's the collision normal)
+          if (overlapX < overlapY && overlapX < overlapZ) {
+            // Resolve along X axis
+            float direction = (pos[0] < block.position[0]) ? -1.0f : 1.0f;
+            pos[0] += direction * overlapX;
+            vel[0] = -vel[0] * restitution - gravity[0]; // or apply bounce: vel[0] =
+                                                         // -vel[0] * restitution;
+          } else if (overlapY < overlapZ) {
+            // Resolve along Y axis
+            float direction = (pos[1] < block.position[1]) ? -1.0f : 1.0f;
+            pos[1] += direction * overlapY;
+            vel[1] = -vel[1] * restitution - gravity[1];
+            if (direction == 1.0f) canJump = true;
+          } else {
+            // Resolve along Z axis
+            float direction = (pos[2] < block.position[2]) ? -1.0f : 1.0f;
+            pos[2] += direction * overlapZ;
+            vel[2] = -vel[2] * restitution - gravity[2];
+          }
+        }
         float light = DotProduct(Normalize(vertexData[0].normal), Normalize(lightDir));
+        if ((actBreak || actPlace) &&
+            rayIntersectsBox(
+                pos + camera, Vec3f { 0.0f, 0.0f, 0.0f } - lightDir, blockP1, blockP2)) {
+          if (!closestBlock ||
+              (Magnitude2(pos + camera - block.position) <
+               Magnitude2(pos + camera - closestBlock->position)))
+            closestBlock = &block;
+        }
         if (1)
           drawTriangle(
               sController.getWindow(windowId),
@@ -376,16 +496,58 @@ int main(void) {
                   tex.data[texIndex + 1] / 255.0f,
                   tex.data[texIndex + 2] / 255.0f
                 };
-                fragColor *= (v.pos[2]) * (1.0f + light);
+                float lightPow = (v.pos[2]) * (1.0f + light);
+                fragColor *= lightPow;
+                fragColor += Vec3f { 0.6f, 0.6f, 0.9f } * std::max(0.0f, 0.5f - lightPow);
                 if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
                 if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
                 if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
                 if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
                 if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
-                if (fragColor[2] < 0.0f) fragColor[2] = 0.0f;
 
                 return fragColor;
               }); // base color
+      }
+    }
+    if (closestBlock) {
+      if (actPlace) {
+        // Determine which face was hit by checking the ray-box intersection point
+        Vec3f rayOrigin = pos + camera;
+        Vec3f rayDir    = Vec3f { 0.0f, 0.0f, 0.0f } - lightDir;
+
+        // Get the intersection point
+        Vec3f blockMin = closestBlock->position - Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f blockMax = closestBlock->position + Vec3f { 0.5f, 0.5f, 0.5f };
+
+        // Find intersection point (you may need to implement this)
+        Vec3f hitPoint = getIntersectionPoint(rayOrigin, rayDir, blockMin, blockMax);
+
+        // Determine which face was hit based on which coordinate is closest to block
+        // boundary
+        Vec3f localHit = hitPoint - closestBlock->position;
+        Vec3f normal   = Vec3f { 0.0f, 0.0f, 0.0f };
+
+        float maxComponent = 0.0f;
+        if (abs(localHit[0]) > maxComponent) {
+          maxComponent = abs(localHit[0]);
+          normal       = Vec3f { localHit[0] > 0 ? 1.0f : -1.0f, 0.0f, 0.0f };
+        }
+        if (abs(localHit[1]) > maxComponent) {
+          maxComponent = abs(localHit[1]);
+          normal       = Vec3f { 0.0f, localHit[1] > 0 ? 1.0f : -1.0f, 0.0f };
+        }
+        if (abs(localHit[2]) > maxComponent) {
+          maxComponent = abs(localHit[2]);
+          normal       = Vec3f { 0.0f, 0.0f, localHit[2] > 0 ? 1.0f : -1.0f };
+        }
+
+        int id         = closestBlock->id;
+        Vec3f position = closestBlock->position + normal;
+        blocks.push_back({ closestBlock->id, position });
+      }
+      if (actBreak) {
+        blocks.erase(
+            std::remove(blocks.begin(), blocks.end(), *closestBlock), blocks.end());
       }
     }
     // Calcul du FPS (mise à jour chaque seconde)

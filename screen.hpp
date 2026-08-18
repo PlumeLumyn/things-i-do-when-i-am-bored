@@ -100,7 +100,8 @@ class Window {
     void clear() {
       std::fill(grid.begin(), grid.end(), ' ');
       std::fill(zBuffer.begin(), zBuffer.end(), INFINITY);
-      // std::fill(colGrid.begin(), colGrid.end(), ' ');
+      for (auto &col : colGrid)
+        col = { 0.6, 0.6, 0.9 };
     }
 
     void write(std::string str, int32_t x, int32_t y) {
