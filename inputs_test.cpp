@@ -29,6 +29,27 @@ struct Image {
     unsigned char *data;
 };
 
+struct BlockData {
+    const Image &top, &left, &right, &front, &back, &bottom;
+    const Image &operator[](const int id) const {
+      switch (id) {
+      case 0:
+        return back;
+      case 1:
+        return front;
+      case 2:
+        return left;
+      case 3:
+        return right;
+      case 4:
+        return bottom;
+      case 5:
+        return top;
+      }
+      return top;
+    }
+};
+
 struct Block {
     int id = 0;
     Vec3f position;
@@ -48,7 +69,7 @@ Image loadTexture(const std::string &path) {
   int texWidth, texHeight, texChannels;
   unsigned char *data = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, 0);
   if (!data) {
-    std::cerr << "Failed to load texture: ./cobblestone.png" << std::endl;
+    std::cerr << "Failed to load texture: " << path << std::endl;
     return { 0, 0, 0, nullptr };
   }
   tex.width    = texWidth;
@@ -58,7 +79,58 @@ Image loadTexture(const std::string &path) {
   return tex;
 }
 
-const std::array<Image, 1> textures = { loadTexture("./cobblestone.png") };
+const std::array textures = {
+  loadTexture("./textures/cobblestone.png"),
+  loadTexture("./textures/grass_block_top.png"),
+  loadTexture("./textures/grass_block_side.png"),
+  loadTexture("./textures/dirt.png"),
+  loadTexture("./textures/oak_log.png"),
+  loadTexture("./textures/oak_log_top.png"),
+  loadTexture("./textures/oak_planks.png"),
+};
+const std::array blockDatas = {
+  BlockData {
+             .top    = textures[0],
+             .left   = textures[0],
+             .right  = textures[0],
+             .front  = textures[0],
+             .back   = textures[0],
+             .bottom = textures[0],
+             },
+  BlockData {
+             .top    = textures[1],
+             .left   = textures[2],
+             .right  = textures[2],
+             .front  = textures[2],
+             .back   = textures[2],
+             .bottom = textures[3],
+             },
+  BlockData {
+             .top    = textures[3],
+             .left   = textures[3],
+             .right  = textures[3],
+             .front  = textures[3],
+             .back   = textures[3],
+             .bottom = textures[3],
+             },
+  BlockData {
+             .top    = textures[6],
+             .left   = textures[6],
+             .right  = textures[6],
+             .front  = textures[6],
+             .back   = textures[6],
+             .bottom = textures[6],
+             },
+  BlockData {
+             .top    = textures[5],
+             .left   = textures[4],
+             .right  = textures[4],
+             .front  = textures[4],
+             .back   = textures[4],
+             .bottom = textures[5],
+             },
+};
+
 std::vector<Block> blocks;
 
 bool rayIntersectsBox(Vec3f origin, Vec3f dir, Vec3f boxMin, Vec3f boxMax) {
@@ -266,36 +338,36 @@ int main(void) {
   // clang-format off
   std::array<Vertex, 36> cube = {
       // Back face (normal: 0, 0, -1)
-      -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 0.0f, 0.0f,
-       0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 1.0f, 0.0f,
-       0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 1.0f, 1.0f,
-       0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 1.0f, 1.0f,
-      -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 0.0f, 1.0f,
-      -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 0.0f, 0.0f,
+      -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 0.0f, 1.0f,
+       0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 1.0f, 1.0f,
+       0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 1.0f, 0.0f,
+       0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 1.0f, 0.0f,
+      -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 0.0f, 0.0f,
+      -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 0.0f, 1.0f,
                                              
       // Front face (normal: 0, 0, 1) 
-      -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 0.0f, 0.0f,
-       0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 1.0f, 0.0f,
-       0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f,
-       0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f,
-      -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 0.0f, 1.0f,
-      -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 0.0f, 0.0f,
+      -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 0.0f, 1.0f,
+       0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f,
+       0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 1.0f, 0.0f,
+       0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 1.0f, 0.0f,
+      -0.5f,  0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 0.0f, 0.0f,
+      -0.5f, -0.5f,  0.5f,  0.0f,  0.0f,  1.0f, 0.0f, 1.0f,
                                              
       // Left face (normal: -1, 0, 0) 
-      -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f, 1.0f, 0.0f,
-      -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f, 1.0f, 1.0f,
-      -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
-      -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
-      -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f, 0.0f, 0.0f,
-      -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f, 1.0f, 0.0f,
+      -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f, 0.0f, 0.0f,
+      -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f, 1.0f, 0.0f,
+      -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f, 1.0f, 1.0f,
+      -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f, 1.0f, 1.0f,
+      -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
+      -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f, 0.0f, 0.0f,
                                              
       // Right face (normal: 1, 0, 0) 
-       0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f, 1.0f, 0.0f,
-       0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f, 1.0f, 1.0f,
-       0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
-       0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
-       0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f, 0.0f, 0.0f,
-       0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f, 1.0f, 0.0f,
+       0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f, 0.0f, 0.0f,
+       0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f, 1.0f, 0.0f,
+       0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f, 1.0f, 1.0f,
+       0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f, 1.0f, 1.0f,
+       0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f, 0.0f, 1.0f,
+       0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f, 0.0f, 0.0f,
                                              
       // Bottom face (normal: 0, -1, 0)
       -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f, 0.0f, 1.0f,
@@ -322,6 +394,7 @@ int main(void) {
   Vec3f gravity      = { 0.0, -0.04f, 0.0 };
   Vec2i lastMousePos = { -1, -1 };
   Mat4f viewMatrix;
+  size_t id = 0;
   Identity(viewMatrix);
   Mat4f projectionMatrix;
   Identity(projectionMatrix);
@@ -359,6 +432,12 @@ int main(void) {
     if (iController.isPressed(Inputs::Keycode::D)) {
       vel[2] += SPEED * -sin(cameraAngle[1]);
       vel[0] += SPEED * cos(cameraAngle[1]);
+    }
+    if (iController.isJustPressed(Inputs::Keycode::R)) {
+      id += 1;
+      if (id >= blockDatas.size()) {
+        id = 0;
+      }
     }
     bool actBreak = false;
     bool actPlace = false;
@@ -436,13 +515,14 @@ int main(void) {
       Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
       for (size_t k = 0; k < cube.size() / 3; k++) {
         std::array<Vertex, 3> vertexData;
-        vertexData[0] = cube[k * 3];
-        vertexData[1] = cube[k * 3 + 1];
-        vertexData[2] = cube[k * 3 + 2];
-        Vec3f blockP1 = block.position - Vec3f { 0.5f, 0.5f, 0.5f };
-        Vec3f blockP2 = block.position + Vec3f { 0.5f, 0.5f, 0.5f };
-        Vec3f posP1   = pos - Vec3f { 0.3f, 0.0f, 0.3f };
-        Vec3f posP2   = pos + Vec3f { 0.3f, 1.9f, 0.3f };
+        vertexData[0]    = cube[k * 3];
+        vertexData[1]    = cube[k * 3 + 1];
+        vertexData[2]    = cube[k * 3 + 2];
+        const Image &tex = blockDatas[block.id][k / 2];
+        Vec3f blockP1    = block.position - Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f blockP2    = block.position + Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f posP1      = pos - Vec3f { 0.3f, 0.0f, 0.3f };
+        Vec3f posP2      = pos + Vec3f { 0.3f, 1.9f, 0.3f };
         if (posP1[0] <= blockP2[0] && posP1[1] <= blockP2[1] && posP1[2] <= blockP2[2] &&
             posP2[0] >= blockP1[0] && posP2[1] >= blockP1[1] && posP2[2] >= blockP1[2]) {
           // Calculate overlap on each axis
@@ -481,32 +561,30 @@ int main(void) {
                Magnitude2(pos + camera - closestBlock->position)))
             closestBlock = &block;
         }
-        if (1)
-          drawTriangle(
-              sController.getWindow(windowId),
-              vertexData,
-              transformMatrix,
-              [light, &block](Vertex v) {
-                const Image &tex = textures[block.id];
-                int texX     = static_cast<int>(v.uv[0] * (tex.width - 1)) % tex.width;
-                int texY     = static_cast<int>(v.uv[1] * (tex.height - 1)) % tex.height;
-                int texIndex = (texY * tex.width + texX) * tex.channels;
-                Vec3f fragColor = {
-                  tex.data[texIndex] / 255.0f,
-                  tex.data[texIndex + 1] / 255.0f,
-                  tex.data[texIndex + 2] / 255.0f
-                };
-                float lightPow = (v.pos[2]) * (1.0f + light);
-                fragColor *= lightPow;
-                fragColor += Vec3f { 0.6f, 0.6f, 0.9f } * std::max(0.0f, 0.5f - lightPow);
-                if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
-                if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
-                if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
-                if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
-                if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
+        drawTriangle(
+            sController.getWindow(windowId),
+            vertexData,
+            transformMatrix,
+            [light, &tex](Vertex v) {
+              int texX        = static_cast<int>(v.uv[0] * (tex.width - 1)) % tex.width;
+              int texY        = static_cast<int>(v.uv[1] * (tex.height - 1)) % tex.height;
+              int texIndex    = (texY * tex.width + texX) * tex.channels;
+              Vec3f fragColor = {
+                tex.data[texIndex] / 255.0f,
+                tex.data[texIndex + 1] / 255.0f,
+                tex.data[texIndex + 2] / 255.0f
+              };
+              float lightPow = (v.pos[2]) * (1.0f + light);
+              fragColor *= lightPow;
+              fragColor += Vec3f { 0.6f, 0.6f, 0.9f } * std::max(0.0f, 0.5f - lightPow);
+              if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
+              if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
+              if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
+              if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
+              if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
 
-                return fragColor;
-              }); // base color
+              return fragColor;
+            }); // base color
       }
     }
     if (closestBlock) {
@@ -541,9 +619,8 @@ int main(void) {
           normal       = Vec3f { 0.0f, 0.0f, localHit[2] > 0 ? 1.0f : -1.0f };
         }
 
-        int id         = closestBlock->id;
         Vec3f position = closestBlock->position + normal;
-        blocks.push_back({ closestBlock->id, position });
+        blocks.push_back({ static_cast<int>(id), position });
       }
       if (actBreak) {
         blocks.erase(
