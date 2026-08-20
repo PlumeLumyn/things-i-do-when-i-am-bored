@@ -54,10 +54,45 @@ constexpr Mat<T, W, H> identity() {
 
 template <typename T, size_t H>
 T DotProduct(const Vec<T, H> &x, const Vec<T, H> &y) {
-  T res = 0.0;
-  int i;
-  for (i = 0; i < H; i++) {
+  T res = T(0);
+  for (size_t i = 0; i < H; i++) {
     res += x[i] * y[i];
+  }
+  return res;
+}
+
+template <typename T, size_t H>
+Vec<T, H> floor(const Vec<T, H> &v) {
+  Vec<T, H> res;
+  for (int i = 0; i < H; ++i) {
+    res[i] = std::floor(v[i]);
+  }
+  return res;
+}
+
+template <typename T, size_t H>
+Vec<T, H> fract(const Vec<T, H> v) {
+  Vec<T, H> flr = floor(v);
+  for (int i = 0; i < H; i++) {
+    flr[i] = v[i] - flr[i];
+  }
+  return flr;
+}
+
+template <typename T, size_t H>
+Vec<T, H> max(const Vec<T, H> &a, const Vec<T, H> &b) {
+  Vec<T, H> res;
+  for (size_t i = 0; i < H; ++i) {
+    res[i] = std::max(a[i], b[i]);
+  }
+  return res;
+}
+
+template <typename T, size_t H>
+Vec<T, H> abs(const Vec<T, H> &v) {
+  Vec<T, H> res;
+  for (int i = 0; i < H; ++i) {
+    res[i] = std::abs(v[i]);
   }
   return res;
 }

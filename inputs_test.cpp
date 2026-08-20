@@ -1,3 +1,4 @@
+#include "noise.hpp"
 #include "screen.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -324,13 +325,38 @@ void drawTriangle(
   }
 }
 
+constexpr int WORLD_WIDTH     = 20;
+constexpr int WORLD_DEPTH     = 20;
+constexpr int WORLD_HEIGHT    = 10;
+constexpr int DIRT_SIZE       = 3;
+constexpr float CLIFF_PERCENT = 0.5f;
+
 int main(void) {
   Inputs::InputController iController;
   Screen::ScreenController sController;
 
-  for (int i = -10; i <= 10; i++)
-    for (int j = -10; j <= 10; j++) {
-      blocks.emplace_back(0, Vec3f { static_cast<float>(i), 0, static_cast<float>(j) });
+  for (int i = 0; i <= WORLD_WIDTH; i++)
+    for (int j = 0; j <= WORLD_DEPTH; j++) {
+      float depth =
+          snoise(Vec2f {
+              i / static_cast<float>(WORLD_WIDTH),
+              j / static_cast<float>(WORLD_DEPTH) }) *
+              (CLIFF_PERCENT / 2.0f) +
+          (1.0f - CLIFF_PERCENT / 2.0f);
+      for (int z = 0; z < depth * WORLD_HEIGHT; z++) {
+        int id = 0;
+
+        if (z + 1 >= depth * WORLD_HEIGHT) {
+          id = 1;
+        } else if (z + DIRT_SIZE >= depth * WORLD_HEIGHT) {
+          id = 2;
+        }
+        blocks.emplace_back(
+            id,
+            Vec3f { static_cast<float>(i - WORLD_WIDTH / 2.0f),
+                    static_cast<float>(z - WORLD_HEIGHT),
+                    static_cast<float>(j - WORLD_DEPTH / 2.0f) });
+      }
     }
 
   // All triangles of the cube (two per face so 12*3 = 36 vertices)
@@ -577,6 +603,10 @@ int main(void) {
               float lightPow = (v.pos[2]) * (1.0f + light);
               fragColor *= lightPow;
               fragColor += Vec3f { 0.6f, 0.6f, 0.9f } * std::max(0.0f, 0.5f - lightPow);
+
+              // float lightPow = snoise(v.uv * 4.0f) * .5 + .5;
+              // fragColor      = { lightPow, lightPow, lightPow };
+
               if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
               if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
               if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
