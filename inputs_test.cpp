@@ -337,12 +337,11 @@ int main(void) {
 
   for (int i = 0; i <= WORLD_WIDTH; i++)
     for (int j = 0; j <= WORLD_DEPTH; j++) {
-      float depth =
-          snoise(Vec2f {
-              i / static_cast<float>(WORLD_WIDTH),
-              j / static_cast<float>(WORLD_DEPTH) }) *
-              (CLIFF_PERCENT / 2.0f) +
-          (1.0f - CLIFF_PERCENT / 2.0f);
+      Vec2f uv = Vec2f {
+        i / static_cast<float>(WORLD_WIDTH), j / static_cast<float>(WORLD_DEPTH)
+      };
+      float noise = snoise(uv);
+      float depth = noise * (CLIFF_PERCENT / 2.0f) + (1.0f - CLIFF_PERCENT / 2.0f);
       for (int z = 0; z < depth * WORLD_HEIGHT; z++) {
         int id = 0;
 
