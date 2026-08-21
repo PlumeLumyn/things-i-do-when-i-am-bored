@@ -141,6 +141,17 @@ class Window {
       }
     };
 
+    bool putZ(int32_t x, int32_t y, float z) {
+      if (x < this->getWidth() && y < this->getSubPixelHeight() && x >= 0 && y >= 0) {
+        float &zBufferPixel = zBuffer[x + y * this->getWidth()];
+        if (z < zBufferPixel) {
+          zBufferPixel = z;
+          return true;
+        }
+      }
+      return false;
+    };
+
     void refresh() {
       std::cout << "\033[" << this->y + 1 << ";" << this->x + 1 << "H";
       std::cout << "╭";

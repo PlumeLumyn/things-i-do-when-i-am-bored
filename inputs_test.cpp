@@ -288,18 +288,21 @@ void drawTriangle(
       float localZ    = w[0] * z[0] + w[1] * z[1] + w[2] * z[2];
       float localInvW = w[0] * invW[0] + w[1] * invW[1] + w[2] * invW[2];
 
-      // // Perspective-correct UV interpolation
-      v.pos = { static_cast<float>(x), static_cast<float>(y), localZ };
-      v.uv  = (w[0] * uv_w[0] + w[1] * uv_w[1] + w[2] * uv_w[2]) / localInvW;
-      v.normal =
-          (w[0] * normal_w[0] + w[1] * normal_w[1] + w[2] * normal_w[2]) / localInvW;
+      if (window.putZ(x, y, -localZ)) {
+        [&]() {
+          // // Perspective-correct UV interpolation
+          v.pos = { static_cast<float>(x), static_cast<float>(y), localZ };
+          v.uv  = (w[0] * uv_w[0] + w[1] * uv_w[1] + w[2] * uv_w[2]) / localInvW;
+          v.normal =
+              (w[0] * normal_w[0] + w[1] * normal_w[1] + w[2] * normal_w[2]) / localInvW;
 
-      Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
-      if (shader) {
-        fragColor = shader(v);
-      };
-
-      window.putPixel(x, y, -localZ, fragColor);
+          Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
+          if (shader) {
+            fragColor = shader(v);
+          };
+          window.putPixel(x, y, -INFINITY, fragColor);
+        }();
+      }
     }
   }
 }
@@ -652,37 +655,34 @@ int main(void) {
           vertexData[2]    = cube[k * 3 + 2];
           const Image &tex = blockDatas[block.id][k / 2];
           float light      = DotProduct(Normalize(vertexData[0].normal), lightDir);
-          if (light >= 0)
-            drawTriangle(
-                sController.getWindow(windowId),
-                vertexData,
-                transformMatrix,
-                [light, &tex](Vertex v) {
-                  int texX = static_cast<int>(v.uv[0] * (tex.width - 1)) % tex.width;
-                  int texY = static_cast<int>(v.uv[1] * (tex.height - 1)) % tex.height;
-                  int texIndex    = (texY * tex.width + texX) * tex.channels;
-                  Vec3f fragColor = {
-                    tex.data[texIndex] / 255.0f,
-                    tex.data[texIndex + 1] / 255.0f,
-                    tex.data[texIndex + 2] / 255.0f
-                  };
-                  float lightPow = (v.pos[2]) * (1.0f + light);
-                  fragColor *= lightPow;
-                  fragColor += Vec3f {
-                    0.6f, 0.6f, 0.9f
-                  } * std::max(0.0f, 0.5f - lightPow);
+          drawTriangle(
+              sController.getWindow(windowId),
+              vertexData,
+              transformMatrix,
+              [light, &tex](Vertex v) {
+                int texX     = static_cast<int>(v.uv[0] * (tex.width - 1)) % tex.width;
+                int texY     = static_cast<int>(v.uv[1] * (tex.height - 1)) % tex.height;
+                int texIndex = (texY * tex.width + texX) * tex.channels;
+                Vec3f fragColor = {
+                  tex.data[texIndex] / 255.0f,
+                  tex.data[texIndex + 1] / 255.0f,
+                  tex.data[texIndex + 2] / 255.0f
+                };
+                float lightPow = (v.pos[2]) * (1.0f + light);
+                fragColor *= lightPow;
+                fragColor += Vec3f { 0.6f, 0.6f, 0.9f } * std::max(0.0f, 0.5f - lightPow);
 
-                  // float lightPow = snoise(v.uv * 4.0f) * .5 + .5;
-                  // fragColor      = { lightPow, lightPow, lightPow };
+                // float lightPow = snoise(v.uv * 4.0f) * .5 + .5;
+                // fragColor      = { lightPow, lightPow, lightPow };
 
-                  if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
-                  if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
-                  if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
-                  if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
-                  if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
+                if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
+                if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
+                if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
+                if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
+                if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
 
-                  return fragColor;
-                }); // base color
+                return fragColor;
+              }); // base color
         }
       }
     if (closestBlock) {

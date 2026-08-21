@@ -75,6 +75,15 @@ T DotProduct(const Vec<T, H> &x, const Vec<T, H> &y) {
   return res;
 }
 
+template <typename T>
+Vec<T, 3> CrossProduct(const Vec<T, 3> &x, const Vec<T, 3> &y) {
+  return Vec<T, 3> {
+    x[1] * y[2] - x[2] * y[1], // i component
+    x[2] * y[0] - x[0] * y[2], // j component
+    x[0] * y[1] - x[1] * y[0]  // k component
+  };
+}
+
 template <typename T, size_t H>
 Vec<T, H> floor(const Vec<T, H> &v) {
   Vec<T, H> res;
