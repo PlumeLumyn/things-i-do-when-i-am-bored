@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cmath>
+#include <functional>
 
 template <typename T, size_t N>
 using Vec = std::array<T, N>;
@@ -36,6 +37,19 @@ using Mat4f = Mat4<float>;
 using Mat2i = Mat2<int>;
 using Mat3i = Mat3<int>;
 using Mat4i = Mat4<int>;
+
+namespace std {
+template <typename T, size_t H>
+struct hash<Vec<T, H>> {
+    size_t operator()(const Vec<T, H> &p) const {
+      size_t hsh = 0;
+      for (int i = 0; i < H; i++) {
+        hsh += std::hash<T>()(p[i]);
+      }
+      return hsh;
+    }
+};
+} // namespace std
 
 template <typename T, size_t W, size_t H>
 constexpr Mat<T, W, H> identity() {
