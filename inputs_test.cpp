@@ -2,6 +2,7 @@
 #include "screen.hpp"
 #include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <unordered_map>
@@ -213,9 +214,21 @@ void drawLine(Screen::Window &w, Vec4f o, Vec4f d, Vec3f col = { 1.0, 1.0, 1.0 }
   }
 }
 
+struct ShaderData {
+    const Image *tex;
+    float light;
+};
+using Shader = std::function<Vec3f(Vertex, ShaderData &)>;
+
+struct PixelData {
+    Shader shader;
+    Vertex v;
+    ShaderData data;
+};
+std::unordered_map<Vec2i, PixelData> pixelsData;
 void drawTriangle(
     Screen::Window &window, std::array<Vertex, 3> &vertexData, Mat4f &transformMatrix,
-    std::function<Vec3f(Vertex)> shader = nullptr) {
+    Shader shader = nullptr, ShaderData *data = nullptr) {
   std::array<Vec4f, 3> t;
   t[0] = ProjectPoint(vertexData[0].pos, transformMatrix);
   t[1] = ProjectPoint(vertexData[1].pos, transformMatrix);
@@ -288,20 +301,16 @@ void drawTriangle(
       float localZ    = w[0] * z[0] + w[1] * z[1] + w[2] * z[2];
       float localInvW = w[0] * invW[0] + w[1] * invW[1] + w[2] * invW[2];
 
-      if (window.putZ(x, y, -localZ)) {
-        [&]() {
-          // // Perspective-correct UV interpolation
-          v.pos = { static_cast<float>(x), static_cast<float>(y), localZ };
-          v.uv  = (w[0] * uv_w[0] + w[1] * uv_w[1] + w[2] * uv_w[2]) / localInvW;
-          v.normal =
-              (w[0] * normal_w[0] + w[1] * normal_w[1] + w[2] * normal_w[2]) / localInvW;
+      // // Perspective-correct UV interpolation
+      v.pos = { static_cast<float>(x), static_cast<float>(y), localZ };
+      v.uv  = (w[0] * uv_w[0] + w[1] * uv_w[1] + w[2] * uv_w[2]) / localInvW;
+      v.normal =
+          (w[0] * normal_w[0] + w[1] * normal_w[1] + w[2] * normal_w[2]) / localInvW;
 
-          Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
-          if (shader) {
-            fragColor = shader(v);
-          };
-          window.putPixel(x, y, -INFINITY, fragColor);
-        }();
+      Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
+
+      if (window.putZ(x, y, -localZ)) {
+        pixelsData[Vec2i { x, y }] = { shader, v, *data };
       }
     }
   }
@@ -596,6 +605,18 @@ int main(void) {
       Vec3i { CHUNK_SIZE,  CHUNK_SIZE,  -CHUNK_SIZE },
       Vec3i { CHUNK_SIZE,  CHUNK_SIZE,  CHUNK_SIZE  },
     };
+    size_t blockCount = 0;
+    for (const auto &displace : displaces) {
+      blockCount +=
+          getChunkFromCollection(
+              chunks,
+              Vec3i { static_cast<int>(pos[0]),
+                      static_cast<int>(pos[1]),
+                      static_cast<int>(pos[2]) } +
+                  displace)
+              .size();
+    }
+    pixelsData.clear();
     for (const auto &displace : displaces)
       for (const auto &block : getChunkFromCollection(
                chunks,
@@ -618,7 +639,7 @@ int main(void) {
           float overlapY = std::min(posP2[1] - blockP1[1], blockP2[1] - posP1[1]);
           float overlapZ = std::min(posP2[2] - blockP1[2], blockP2[2] - posP1[2]);
 
-          float restitution = 0.1;
+          float restitution = 0.0;
 
           // Find the axis with minimum overlap (that's the collision normal)
           if (overlapX < overlapY && overlapX < overlapZ) {
@@ -650,16 +671,19 @@ int main(void) {
         }
         for (size_t k = 0; k < cube.size() / 3; k++) {
           std::array<Vertex, 3> vertexData;
-          vertexData[0]    = cube[k * 3];
-          vertexData[1]    = cube[k * 3 + 1];
-          vertexData[2]    = cube[k * 3 + 2];
-          const Image &tex = blockDatas[block.id][k / 2];
-          float light      = DotProduct(Normalize(vertexData[0].normal), lightDir);
+          vertexData[0]   = cube[k * 3];
+          vertexData[1]   = cube[k * 3 + 1];
+          vertexData[2]   = cube[k * 3 + 2];
+          ShaderData data = {
+            &blockDatas[block.id][k / 2],
+            DotProduct(Normalize(vertexData[0].normal), lightDir),
+          };
           drawTriangle(
               sController.getWindow(windowId),
               vertexData,
               transformMatrix,
-              [light, &tex](Vertex v) {
+              [](Vertex v, ShaderData &d) {
+                const Image &tex = *d.tex;
                 int texX     = static_cast<int>(v.uv[0] * (tex.width - 1)) % tex.width;
                 int texY     = static_cast<int>(v.uv[1] * (tex.height - 1)) % tex.height;
                 int texIndex = (texY * tex.width + texX) * tex.channels;
@@ -668,7 +692,7 @@ int main(void) {
                   tex.data[texIndex + 1] / 255.0f,
                   tex.data[texIndex + 2] / 255.0f
                 };
-                float lightPow = (v.pos[2]) * (1.0f + light);
+                float lightPow = (v.pos[2]) * (1.0f + d.light);
                 fragColor *= lightPow;
                 fragColor += Vec3f { 0.6f, 0.6f, 0.9f } * std::max(0.0f, 0.5f - lightPow);
 
@@ -682,9 +706,17 @@ int main(void) {
                 if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
 
                 return fragColor;
-              }); // base color
+              },
+              &data); // base color
         }
       }
+    for (auto &pixelData : pixelsData) {
+      sController.getWindow(windowId).putPixel(
+          pixelData.first[0],
+          pixelData.first[1],
+          -INFINITY,
+          pixelData.second.shader(pixelData.second.v, pixelData.second.data));
+    }
     if (closestBlock) {
       if (actPlace) {
         // Determine which face was hit by checking the ray-box intersection point
