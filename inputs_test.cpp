@@ -560,6 +560,7 @@ int main(void) {
     };
     Vec3f lightDir;
     MatrixVectorMult(viewMatrix3, { 0.0f, 0.0f, 1.0f }, lightDir);
+    lightDir = Normalize(lightDir);
 
     Identity(modelMatrix);
     const Block *closestBlock = nullptr;
@@ -603,86 +604,85 @@ int main(void) {
         modelMatrix[1][3]     = block.position[1];
         modelMatrix[2][3]     = block.position[2];
         Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
+        Vec3f blockP1         = block.position - Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f blockP2         = block.position + Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f posP1           = pos - Vec3f { 0.3f, 0.0f, 0.3f };
+        Vec3f posP2           = pos + Vec3f { 0.3f, 1.9f, 0.3f };
+        if (posP1[0] <= blockP2[0] && posP1[1] <= blockP2[1] && posP1[2] <= blockP2[2] &&
+            posP2[0] >= blockP1[0] && posP2[1] >= blockP1[1] && posP2[2] >= blockP1[2]) {
+          // Calculate overlap on each axis
+          float overlapX = std::min(posP2[0] - blockP1[0], blockP2[0] - posP1[0]);
+          float overlapY = std::min(posP2[1] - blockP1[1], blockP2[1] - posP1[1]);
+          float overlapZ = std::min(posP2[2] - blockP1[2], blockP2[2] - posP1[2]);
+
+          float restitution = 0.1;
+
+          // Find the axis with minimum overlap (that's the collision normal)
+          if (overlapX < overlapY && overlapX < overlapZ) {
+            // Resolve along X axis
+            float direction = (pos[0] < block.position[0]) ? -1.0f : 1.0f;
+            pos[0] += direction * overlapX;
+            vel[0] = -vel[0] * restitution - gravity[0]; // or apply bounce: vel[0] =
+                                                         // -vel[0] * restitution;
+          } else if (overlapY < overlapZ) {
+            // Resolve along Y axis
+            float direction = (pos[1] < block.position[1]) ? -1.0f : 1.0f;
+            pos[1] += direction * overlapY;
+            vel[1] = -vel[1] * restitution - gravity[1];
+            if (direction == 1.0f) canJump = true;
+          } else {
+            // Resolve along Z axis
+            float direction = (pos[2] < block.position[2]) ? -1.0f : 1.0f;
+            pos[2] += direction * overlapZ;
+            vel[2] = -vel[2] * restitution - gravity[2];
+          }
+        }
+        if ((actBreak || actPlace) &&
+            rayIntersectsBox(
+                pos + camera, Vec3f { 0.0f, 0.0f, 0.0f } - lightDir, blockP1, blockP2)) {
+          if (!closestBlock ||
+              (Magnitude2(pos + camera - block.position) <
+               Magnitude2(pos + camera - closestBlock->position)))
+            closestBlock = &block;
+        }
         for (size_t k = 0; k < cube.size() / 3; k++) {
           std::array<Vertex, 3> vertexData;
           vertexData[0]    = cube[k * 3];
           vertexData[1]    = cube[k * 3 + 1];
           vertexData[2]    = cube[k * 3 + 2];
           const Image &tex = blockDatas[block.id][k / 2];
-          Vec3f blockP1    = block.position - Vec3f { 0.5f, 0.5f, 0.5f };
-          Vec3f blockP2    = block.position + Vec3f { 0.5f, 0.5f, 0.5f };
-          Vec3f posP1      = pos - Vec3f { 0.3f, 0.0f, 0.3f };
-          Vec3f posP2      = pos + Vec3f { 0.3f, 1.9f, 0.3f };
-          if (posP1[0] <= blockP2[0] && posP1[1] <= blockP2[1] &&
-              posP1[2] <= blockP2[2] && posP2[0] >= blockP1[0] &&
-              posP2[1] >= blockP1[1] && posP2[2] >= blockP1[2]) {
-            // Calculate overlap on each axis
-            float overlapX = std::min(posP2[0] - blockP1[0], blockP2[0] - posP1[0]);
-            float overlapY = std::min(posP2[1] - blockP1[1], blockP2[1] - posP1[1]);
-            float overlapZ = std::min(posP2[2] - blockP1[2], blockP2[2] - posP1[2]);
+          float light      = DotProduct(Normalize(vertexData[0].normal), lightDir);
+          if (light >= 0)
+            drawTriangle(
+                sController.getWindow(windowId),
+                vertexData,
+                transformMatrix,
+                [light, &tex](Vertex v) {
+                  int texX = static_cast<int>(v.uv[0] * (tex.width - 1)) % tex.width;
+                  int texY = static_cast<int>(v.uv[1] * (tex.height - 1)) % tex.height;
+                  int texIndex    = (texY * tex.width + texX) * tex.channels;
+                  Vec3f fragColor = {
+                    tex.data[texIndex] / 255.0f,
+                    tex.data[texIndex + 1] / 255.0f,
+                    tex.data[texIndex + 2] / 255.0f
+                  };
+                  float lightPow = (v.pos[2]) * (1.0f + light);
+                  fragColor *= lightPow;
+                  fragColor += Vec3f {
+                    0.6f, 0.6f, 0.9f
+                  } * std::max(0.0f, 0.5f - lightPow);
 
-            float restitution = 0.1;
+                  // float lightPow = snoise(v.uv * 4.0f) * .5 + .5;
+                  // fragColor      = { lightPow, lightPow, lightPow };
 
-            // Find the axis with minimum overlap (that's the collision normal)
-            if (overlapX < overlapY && overlapX < overlapZ) {
-              // Resolve along X axis
-              float direction = (pos[0] < block.position[0]) ? -1.0f : 1.0f;
-              pos[0] += direction * overlapX;
-              vel[0] = -vel[0] * restitution - gravity[0]; // or apply bounce: vel[0] =
-                                                           // -vel[0] * restitution;
-            } else if (overlapY < overlapZ) {
-              // Resolve along Y axis
-              float direction = (pos[1] < block.position[1]) ? -1.0f : 1.0f;
-              pos[1] += direction * overlapY;
-              vel[1] = -vel[1] * restitution - gravity[1];
-              if (direction == 1.0f) canJump = true;
-            } else {
-              // Resolve along Z axis
-              float direction = (pos[2] < block.position[2]) ? -1.0f : 1.0f;
-              pos[2] += direction * overlapZ;
-              vel[2] = -vel[2] * restitution - gravity[2];
-            }
-          }
-          float light = DotProduct(Normalize(vertexData[0].normal), Normalize(lightDir));
-          // if ((actBreak || actPlace) &&
-          //     rayIntersectsBox(
-          //         pos + camera,
-          //         Vec3f { 0.0f, 0.0f, 0.0f } - lightDir,
-          //         blockP1,
-          //         blockP2)) {
-          //   if (!closestBlock ||
-          //       (Magnitude2(pos + camera - block.position) <
-          //        Magnitude2(pos + camera - closestBlock->position)))
-          //     closestBlock = &block;
-          // }
-          drawTriangle(
-              sController.getWindow(windowId),
-              vertexData,
-              transformMatrix,
-              [light, &tex](Vertex v) {
-                int texX     = static_cast<int>(v.uv[0] * (tex.width - 1)) % tex.width;
-                int texY     = static_cast<int>(v.uv[1] * (tex.height - 1)) % tex.height;
-                int texIndex = (texY * tex.width + texX) * tex.channels;
-                Vec3f fragColor = {
-                  tex.data[texIndex] / 255.0f,
-                  tex.data[texIndex + 1] / 255.0f,
-                  tex.data[texIndex + 2] / 255.0f
-                };
-                float lightPow = (v.pos[2]) * (1.0f + light);
-                fragColor *= lightPow;
-                fragColor += Vec3f { 0.6f, 0.6f, 0.9f } * std::max(0.0f, 0.5f - lightPow);
+                  if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
+                  if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
+                  if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
+                  if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
+                  if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
 
-                // float lightPow = snoise(v.uv * 4.0f) * .5 + .5;
-                // fragColor      = { lightPow, lightPow, lightPow };
-
-                if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
-                if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
-                if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
-                if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
-                if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
-
-                return fragColor;
-              }); // base color
+                  return fragColor;
+                }); // base color
         }
       }
     if (closestBlock) {
