@@ -2,7 +2,7 @@
 #include "screen.hpp"
 #include <algorithm>
 #include <cstddef>
-#include <filesystem>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <unordered_map>
@@ -54,8 +54,8 @@ struct BlockData {
 
 struct Block {
     int id = 0;
-    Vec3f position;
-    Block(int id, Vec3f position) : id(id), position(position) {};
+    Vec3i position;
+    Block(int id, Vec3i position) : id(id), position(position) {};
 
     bool operator==(const Block &o) {
       return id == o.id && position == o.position;
@@ -69,12 +69,13 @@ struct Block {
 using Chunk           = std::vector<Block>;
 using ChunkCollection = std::unordered_map<Vec3i, Chunk>;
 
-constexpr int WORLD_WIDTH     = 64;
-constexpr int WORLD_DEPTH     = 64;
+constexpr int WORLD_WIDTH     = 256;
+constexpr int WORLD_DEPTH     = 256;
 constexpr int WORLD_HEIGHT    = 80;
 constexpr int DIRT_SIZE       = 3;
 constexpr float CLIFF_PERCENT = 0.5f;
-constexpr int CHUNK_SIZE      = 8;
+constexpr float CLIFF_RADIUS  = 32.0f;
+constexpr int CHUNK_SIZE      = 16;
 
 Image loadTexture(const std::string &path) {
   Image tex;
@@ -91,9 +92,34 @@ Image loadTexture(const std::string &path) {
   return tex;
 }
 
+inline int floorDiv(int value, int divisor) {
+  return value >= 0 ? value / divisor : (value - divisor + 1) / divisor;
+}
+
 Chunk &getChunkFromCollection(ChunkCollection &collection, const Vec3i &position) {
   return collection[{
-      position[0] / CHUNK_SIZE, position[1] / CHUNK_SIZE, position[2] / CHUNK_SIZE }];
+      floorDiv(position[0], CHUNK_SIZE),
+      floorDiv(position[1], CHUNK_SIZE),
+      floorDiv(position[2], CHUNK_SIZE) }];
+}
+
+// Add this helper function
+inline int positiveMod(int value, int mod) {
+  int result = value % mod;
+  return result < 0 ? result + mod : result;
+}
+
+Vec3i getBlockChunkPosition(const Block &block) {
+  return {
+    positiveMod(static_cast<int>(block.position[0]), CHUNK_SIZE),
+    positiveMod(static_cast<int>(block.position[1]), CHUNK_SIZE),
+    positiveMod(static_cast<int>(block.position[2]), CHUNK_SIZE)
+  };
+}
+
+bool isPositionInChunk(const Vec3i &position) {
+  return position[0] >= 0 && position[0] < CHUNK_SIZE && position[1] >= 0 &&
+         position[1] < CHUNK_SIZE && position[2] >= 0 && position[2] < CHUNK_SIZE;
 }
 
 void addBlockToChunkCollection(ChunkCollection &collection, const Block &block) {
@@ -214,21 +240,11 @@ void drawLine(Screen::Window &w, Vec4f o, Vec4f d, Vec3f col = { 1.0, 1.0, 1.0 }
   }
 }
 
-struct ShaderData {
-    const Image *tex;
-    float light;
-};
-using Shader = std::function<Vec3f(Vertex, ShaderData &)>;
+using Shader = std::function<bool(Vertex, Vec3f &)>;
 
-struct PixelData {
-    Shader shader;
-    Vertex v;
-    ShaderData data;
-};
-std::unordered_map<Vec2i, PixelData> pixelsData;
 void drawTriangle(
     Screen::Window &window, std::array<Vertex, 3> &vertexData, Mat4f &transformMatrix,
-    Shader shader = nullptr, ShaderData *data = nullptr) {
+    Shader shader = nullptr) {
   std::array<Vec4f, 3> t;
   t[0] = ProjectPoint(vertexData[0].pos, transformMatrix);
   t[1] = ProjectPoint(vertexData[1].pos, transformMatrix);
@@ -237,9 +253,11 @@ void drawTriangle(
   // Also check W was positive (point was in front of camera)
   if (t[0][3] <= 0 || t[1][3] <= 0 || t[2][3] <= 0) // Behind camera
     return;
-  if (t[0][2] < -1.0f || t[0][2] > 1.0f || t[1][2] < -1.0f || t[1][2] > 1.0f ||
-      t[2][2] < -1.0f || t[2][2] > 1.0f)
-    return;
+  // Remove the overly aggressive Z clipping check
+  // Only reject if ALL vertices are outside the same side
+  // if ((t[0][2] < -1.0f && t[1][2] < -1.0f && t[2][2] < -1.0f) || // All too close
+  //     (t[0][2] > 1.0f && t[1][2] > 1.0f && t[2][2] > 1.0f))      // All too far
+  //   return;
 
   Vec2i p0 = ToScreenCoords(t[0], window.getWidth(), window.getSubPixelHeight());
   Vec2i p1 = ToScreenCoords(t[1], window.getWidth(), window.getSubPixelHeight());
@@ -307,10 +325,9 @@ void drawTriangle(
       v.normal =
           (w[0] * normal_w[0] + w[1] * normal_w[1] + w[2] * normal_w[2]) / localInvW;
 
-      Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
-
-      if (window.putZ(x, y, -localZ)) {
-        pixelsData[Vec2i { x, y }] = { shader, v, *data };
+      if (shader) {
+        Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
+        if (shader(v, fragColor)) window.putPixel(x, y, -localZ, fragColor);
       }
     }
   }
@@ -368,6 +385,15 @@ const std::array blockDatas = {
              },
 };
 
+const std::array blockDisplaces {
+  Vec3i { 0,  0,  -1 },
+   Vec3i { 0,  0,  1  },
+   Vec3i { -1, 0,  0  },
+  Vec3i { 1,  0,  0  },
+   Vec3i { 0,  -1, 0  },
+   Vec3i { 0,  1,  0  },
+};
+
 ChunkCollection chunks;
 
 int main(void) {
@@ -376,9 +402,7 @@ int main(void) {
 
   for (int i = 0; i <= WORLD_WIDTH; i++)
     for (int j = 0; j <= WORLD_DEPTH; j++) {
-      Vec2f uv = Vec2f {
-        i / static_cast<float>(WORLD_WIDTH), j / static_cast<float>(WORLD_DEPTH)
-      };
+      Vec2f uv    = Vec2f { i / CLIFF_RADIUS, j / CLIFF_RADIUS };
       float noise = snoise(uv);
       float depth = noise * (CLIFF_PERCENT / 2.0f) + (1.0f - CLIFF_PERCENT / 2.0f);
       for (int z = 0; z < depth * WORLD_HEIGHT; z++) {
@@ -393,9 +417,8 @@ int main(void) {
             chunks,
             {
                 id,
-                Vec3f { static_cast<float>(i - WORLD_WIDTH / 2.0f),
-                       static_cast<float>(z - WORLD_HEIGHT),
-                       static_cast<float>(j - WORLD_DEPTH / 2.0f) }
+                Vec3i {
+                       (i - WORLD_WIDTH / 2), (z - WORLD_HEIGHT), (j - WORLD_DEPTH / 2) }
         });
       }
     }
@@ -474,6 +497,8 @@ int main(void) {
   auto lastFpsUpdate = std::chrono::steady_clock::now();
   int frameCount     = 0;
   bool canJump       = true;
+  bool isJumping     = false; // Track if we're in a jump
+  int jumpFrames     = 0;     // Track how long jump has been held
 
   while (1) {
     auto frameStart = std::chrono::steady_clock::now();
@@ -523,26 +548,34 @@ int main(void) {
       if (cameraAngle[0] > 1.57) cameraAngle[0] = 1.57;
     }
     lastMousePos = iController.getMousePos();
-    if (iController.isPressed(Inputs::Keycode::Space)) {
-      if (canJump) {
-        vel[1]  = 0.4f;
-        canJump = false;
-      }
-      vel[1] += 0.03f;
+    if (iController.isJustPressed(Inputs::Keycode::Space) && canJump && vel[1] > -0.2f) {
+      // Initial jump impulse
+      vel[1]     = 0.2f;
+      canJump    = false;
+      isJumping  = true;
+      jumpFrames = 0;
     }
-    // if (iController.isJustPressed(Inputs::Keycode::Space)) {
-    //   reversedGravity = !reversedGravity;
-    // }
+    // Continue adding upward velocity while holding Space (limited duration and only
+    // while moving up)
+    const int MAX_JUMP_FRAMES = 8;  // Maximum frames to allow boost (adjust for max jump
+                                    // height)
+    const float JUMP_BOOST = 0.05f; // Additional velocity per frame while holding
+                                    //
+    if (iController.isPressed(Inputs::Keycode::Space) && isJumping &&
+        jumpFrames < MAX_JUMP_FRAMES && vel[1] > 0) {
+      vel[1] += JUMP_BOOST;
+      jumpFrames++;
+    } else if (!iController.isPressed(Inputs::Keycode::Space) || vel[1] <= 0) {
+      // Stop boosting if Space released or player starts falling
+      isJumping = false;
+    }
+
     iController.refresh();
 
-    vel[1] += gravity[1];
-    pos[0] += vel[0];
-    pos[1] += vel[1];
-    pos[2] += vel[2];
+    vel += gravity;
+    pos += vel;
 
-    vel[0] *= 0.8f;
-    vel[1] *= 0.8f;
-    vel[2] *= 0.8f;
+    vel *= 0.9f;
 
     // if (pos[1] < 0.5f) {
     //   vel[1] = 0.0f;
@@ -551,11 +584,11 @@ int main(void) {
 
     size_t windowId = sController.createWindow(0, 0, 0, 0);
     sController.getWindow(windowId).clear();
-    const float NEAR_CLIP = 0.01;
+    const float NEAR_CLIP = 0.0001;
     const float FAR_CLIP  = 20.0;
 
     viewMatrix       = BuildViewMatrix(pos + camera, cameraAngle);
-    float fovY       = 90.0f * (M_PI / 180.0f); // 30 degrees in radians
+    float fovY       = 80.0f * (M_PI / 180.0f); // 30 degrees in radians
     projectionMatrix = BuildProjectionMatrix(
         fovY,
         static_cast<float>(sController.getWindow(windowId).getWidth()) /
@@ -616,22 +649,34 @@ int main(void) {
                   displace)
               .size();
     }
-    pixelsData.clear();
-    for (const auto &displace : displaces)
-      for (const auto &block : getChunkFromCollection(
-               chunks,
-               Vec3i { static_cast<int>(pos[0]),
-                       static_cast<int>(pos[1]),
-                       static_cast<int>(pos[2]) } +
-                   displace)) {
-        modelMatrix[0][3]     = block.position[0];
-        modelMatrix[1][3]     = block.position[1];
-        modelMatrix[2][3]     = block.position[2];
-        Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
-        Vec3f blockP1         = block.position - Vec3f { 0.5f, 0.5f, 0.5f };
-        Vec3f blockP2         = block.position + Vec3f { 0.5f, 0.5f, 0.5f };
-        Vec3f posP1           = pos - Vec3f { 0.3f, 0.0f, 0.3f };
-        Vec3f posP2           = pos + Vec3f { 0.3f, 1.9f, 0.3f };
+    for (const auto &displace : displaces) {
+      std::array<std::array<std::array<bool, CHUNK_SIZE>, CHUNK_SIZE>, CHUNK_SIZE>
+          blockGrid {};
+      Chunk &chunk = getChunkFromCollection(
+          chunks,
+          Vec3i { static_cast<int>(pos[0]),
+                  static_cast<int>(pos[1]),
+                  static_cast<int>(pos[2]) } +
+              displace);
+      for (const auto &block : chunk) {
+        const Vec3i &blockChunkPosition = getBlockChunkPosition(block);
+        blockGrid[blockChunkPosition[0]][blockChunkPosition[1]][blockChunkPosition[2]] =
+            true;
+      }
+      for (const auto &block : chunk) {
+        modelMatrix[0][3]        = block.position[0];
+        modelMatrix[1][3]        = block.position[1];
+        modelMatrix[2][3]        = block.position[2];
+        Mat4f transformMatrix    = MatMul(vpMatrix, modelMatrix);
+        Vec3f floatBlockPosition = Vec3f {
+          static_cast<float>(block.position[0]),
+          static_cast<float>(block.position[1]),
+          static_cast<float>(block.position[2])
+        };
+        Vec3f blockP1 = floatBlockPosition - Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f blockP2 = floatBlockPosition + Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f posP1   = pos - Vec3f { 0.3f, 0.0f, 0.3f };
+        Vec3f posP2   = pos + Vec3f { 0.3f, 1.9f, 0.3f };
         if (posP1[0] <= blockP2[0] && posP1[1] <= blockP2[1] && posP1[2] <= blockP2[2] &&
             posP2[0] >= blockP1[0] && posP2[1] >= blockP1[1] && posP2[2] >= blockP1[2]) {
           // Calculate overlap on each axis
@@ -653,7 +698,11 @@ int main(void) {
             float direction = (pos[1] < block.position[1]) ? -1.0f : 1.0f;
             pos[1] += direction * overlapY;
             vel[1] = -vel[1] * restitution - gravity[1];
-            if (direction == 1.0f) canJump = true;
+            if (direction == 1.0f) {
+              canJump = true;
+              // Ground friction is harder
+              vel *= 0.9f;
+            }
           } else {
             // Resolve along Z axis
             float direction = (pos[2] < block.position[2]) ? -1.0f : 1.0f;
@@ -661,38 +710,44 @@ int main(void) {
             vel[2] = -vel[2] * restitution - gravity[2];
           }
         }
-        if ((actBreak || actPlace) &&
-            rayIntersectsBox(
+        if (rayIntersectsBox(
                 pos + camera, Vec3f { 0.0f, 0.0f, 0.0f } - lightDir, blockP1, blockP2)) {
           if (!closestBlock ||
-              (Magnitude2(pos + camera - block.position) <
-               Magnitude2(pos + camera - closestBlock->position)))
+              (Magnitude2(pos + camera - floatBlockPosition) <
+               Magnitude2(
+                   pos + camera -
+                   Vec3f { static_cast<float>(closestBlock->position[0]),
+                           static_cast<float>(closestBlock->position[1]),
+                           static_cast<float>(closestBlock->position[2]) })))
             closestBlock = &block;
         }
         for (size_t k = 0; k < cube.size() / 3; k++) {
           std::array<Vertex, 3> vertexData;
-          vertexData[0]   = cube[k * 3];
-          vertexData[1]   = cube[k * 3 + 1];
-          vertexData[2]   = cube[k * 3 + 2];
-          ShaderData data = {
-            &blockDatas[block.id][k / 2],
-            DotProduct(Normalize(vertexData[0].normal), lightDir),
-          };
+          vertexData[0] = cube[k * 3];
+          vertexData[1] = cube[k * 3 + 1];
+          vertexData[2] = cube[k * 3 + 2];
+          const Vec3i blockChunkPosition =
+              getBlockChunkPosition(block) + blockDisplaces[k / 2];
+          if (isPositionInChunk(blockChunkPosition) &&
+              blockGrid
+                  [blockChunkPosition[0]][blockChunkPosition[1]][blockChunkPosition[2]])
+            continue;
+          const Image &tex = blockDatas[block.id][k / 2];
+          float light      = DotProduct(Normalize(vertexData[0].normal), lightDir);
           drawTriangle(
               sController.getWindow(windowId),
               vertexData,
               transformMatrix,
-              [](Vertex v, ShaderData &d) {
-                const Image &tex = *d.tex;
-                int texX     = static_cast<int>(v.uv[0] * (tex.width - 1)) % tex.width;
-                int texY     = static_cast<int>(v.uv[1] * (tex.height - 1)) % tex.height;
+              [&tex, &light](Vertex v, Vec3f &fragColor) {
+                int texX     = static_cast<int>(v.uv[0] * (tex.width)) % tex.width;
+                int texY     = static_cast<int>(v.uv[1] * (tex.height)) % tex.height;
                 int texIndex = (texY * tex.width + texX) * tex.channels;
-                Vec3f fragColor = {
+                fragColor    = {
                   tex.data[texIndex] / 255.0f,
                   tex.data[texIndex + 1] / 255.0f,
                   tex.data[texIndex + 2] / 255.0f
                 };
-                float lightPow = (v.pos[2]) * (1.0f + d.light);
+                float lightPow = (v.pos[2]) * (1.0f + light);
                 fragColor *= lightPow;
                 fragColor += Vec3f { 0.6f, 0.6f, 0.9f } * std::max(0.0f, 0.5f - lightPow);
 
@@ -705,57 +760,79 @@ int main(void) {
                 if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
                 if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
 
-                return fragColor;
-              },
-              &data); // base color
+                return true;
+              }); // base color
         }
       }
-    for (auto &pixelData : pixelsData) {
-      sController.getWindow(windowId).putPixel(
-          pixelData.first[0],
-          pixelData.first[1],
-          -INFINITY,
-          pixelData.second.shader(pixelData.second.v, pixelData.second.data));
     }
     if (closestBlock) {
+      for (size_t k = 0; k < cube.size() / 3; k++) {
+        std::array<Vertex, 3> vertexData;
+        vertexData[0] = cube[k * 3];
+        vertexData[1] = cube[k * 3 + 1];
+        vertexData[2] = cube[k * 3 + 2];
+
+        modelMatrix[0][3]     = closestBlock->position[0];
+        modelMatrix[1][3]     = closestBlock->position[1];
+        modelMatrix[2][3]     = closestBlock->position[2];
+        Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
+        drawTriangle(
+            sController.getWindow(windowId),
+            vertexData,
+            transformMatrix,
+            [](Vertex v, Vec3f &fragColor) {
+              fragColor = { 0.0f, 0.0f, 0.0f };
+              int x     = static_cast<int>(v.uv[0] * (16)) % 16;
+              int y     = static_cast<int>(v.uv[1] * (16)) % 16;
+              if (x > 0 && y > 0 && x < 15 && y < 15) return false;
+              return true;
+            }); // base color
+      }
+
       if (actPlace) {
         // Determine which face was hit by checking the ray-box intersection point
         Vec3f rayOrigin = pos + camera;
         Vec3f rayDir    = Vec3f { 0.0f, 0.0f, 0.0f } - lightDir;
 
         // Get the intersection point
-        Vec3f blockMin = closestBlock->position - Vec3f { 0.5f, 0.5f, 0.5f };
-        Vec3f blockMax = closestBlock->position + Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f floatBlockPosition = {
+          static_cast<float>(closestBlock->position[0]),
+          static_cast<float>(closestBlock->position[1]),
+          static_cast<float>(closestBlock->position[2])
+        };
+        Vec3f blockMin = floatBlockPosition - Vec3f { 0.5f, 0.5f, 0.5f };
+        Vec3f blockMax = floatBlockPosition + Vec3f { 0.5f, 0.5f, 0.5f };
 
         // Find intersection point (you may need to implement this)
         Vec3f hitPoint = getIntersectionPoint(rayOrigin, rayDir, blockMin, blockMax);
 
         // Determine which face was hit based on which coordinate is closest to block
         // boundary
-        Vec3f localHit = hitPoint - closestBlock->position;
-        Vec3f normal   = Vec3f { 0.0f, 0.0f, 0.0f };
+        Vec3f localHit = hitPoint - floatBlockPosition;
+        Vec3i normal   = Vec3i { 0, 0, 0 };
 
         float maxComponent = 0.0f;
         if (abs(localHit[0]) > maxComponent) {
           maxComponent = abs(localHit[0]);
-          normal       = Vec3f { localHit[0] > 0 ? 1.0f : -1.0f, 0.0f, 0.0f };
+          normal       = Vec3i { localHit[0] > 0 ? 1 : -1, 0, 0 };
         }
         if (abs(localHit[1]) > maxComponent) {
           maxComponent = abs(localHit[1]);
-          normal       = Vec3f { 0.0f, localHit[1] > 0 ? 1.0f : -1.0f, 0.0f };
+          normal       = Vec3i { 0, localHit[1] > 0 ? 1 : -1, 0 };
         }
         if (abs(localHit[2]) > maxComponent) {
           maxComponent = abs(localHit[2]);
-          normal       = Vec3f { 0.0f, 0.0f, localHit[2] > 0 ? 1.0f : -1.0f };
+          normal       = Vec3i { 0, 0, localHit[2] > 0 ? 1 : -1 };
         }
 
-        Vec3f position = closestBlock->position + normal;
+        Vec3i position = closestBlock->position + normal;
         addBlockToChunkCollection(chunks, { static_cast<int>(id), position });
       }
       if (actBreak) {
         removeBlockToChunkCollection(chunks, *closestBlock);
       }
     }
+
     // Calcul du FPS (mise à jour chaque seconde)
     frameCount++;
     auto now     = std::chrono::steady_clock::now();

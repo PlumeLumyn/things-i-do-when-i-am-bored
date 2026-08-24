@@ -126,7 +126,7 @@ class Window {
     void putPixel(int32_t x, int32_t y, float z, Vec3f penCol) {
       if (x < this->getWidth() && y < this->getSubPixelHeight() && x >= 0 && y >= 0) {
         float &zBufferPixel = zBuffer[x + y * this->getWidth()];
-        if (z < zBufferPixel) {
+        if (z <= zBufferPixel) {
           zBufferPixel       = z;
           std::string &pixel = grid[x + (y / 2) * this->getWidth()];
           Vec3f &col         = colGrid[x + y * this->getWidth()];
@@ -144,7 +144,7 @@ class Window {
     bool putZ(int32_t x, int32_t y, float z) {
       if (x < this->getWidth() && y < this->getSubPixelHeight() && x >= 0 && y >= 0) {
         float &zBufferPixel = zBuffer[x + y * this->getWidth()];
-        if (z < zBufferPixel) {
+        if (z <= zBufferPixel) {
           zBufferPixel = z;
           return true;
         }
