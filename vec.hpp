@@ -3,6 +3,7 @@
 #include <cmath>
 #include <functional>
 
+#pragma region Types definitions
 template <typename T, size_t N>
 using Vec = std::array<T, N>;
 template <typename T, size_t W, size_t H>
@@ -51,12 +52,14 @@ struct hash<Vec<T, H>> {
 };
 } // namespace std
 
+#pragma endregion
+#pragma region Linear Algebra Utils
 template <typename T, size_t W, size_t H>
 constexpr Mat<T, W, H> identity() {
   Mat<T, W, H> res;
   for (size_t i = 0; i < W; i++) {
     for (size_t j = 0; j < H; j++) {
-      res[i][j] = i == j;
+      res[i][j] = (i == j) ? T(1) : T(0);
     }
   }
   return res;
@@ -184,7 +187,7 @@ void _matmul(
 }
 
 template <typename T, size_t W, size_t H>
-inline Mat<T, W, H> MatMul(Mat<T, W, H> &A, Mat<T, W, H> &B) {
+inline Mat<T, W, H> MatMul(const Mat<T, W, H> &A, const Mat<T, W, H> &B) {
   Mat<T, W, H> C;
 
   int start = 0;
@@ -267,6 +270,9 @@ inline Vec2i ToScreenCoords(Vec4f &ndc, int screenWidth, int screenHeight) {
   };
 }
 
+#pragma endregion
+#pragma region Vec<T, N> operators
+
 // Scalar multiplication: vec * scalar
 template <typename T, size_t N>
 Vec<T, N> operator*(const Vec<T, N> &v, T scalar) {
@@ -348,15 +354,18 @@ Vec<T, N> &operator-=(Vec<T, N> &a, const Vec<T, N> &b) {
 }
 
 template <typename T, size_t W, size_t H>
-Mat<T, W, H> operator*(const Mat<T, W, H> &A, const Mat<T, W, H> &B) {
-  return MatMul(A, B);
-}
-
-template <typename T, size_t W, size_t H>
 Vec<T, H> operator*(const Mat<T, W, H> &mat, const Vec<T, H> &vec) {
   Vec<T, H> result;
   MatrixVectorMult(mat, vec, result);
   return result;
+}
+
+#pragma endregion
+#pragma region Mat<T, W, H> operators
+
+template <typename T, size_t W, size_t H>
+Mat<T, W, H> operator*(const Mat<T, W, H> &A, const Mat<T, W, H> &B) {
+  return MatMul(A, B);
 }
 
 // Scalar :
@@ -394,3 +403,146 @@ Mat<T, W, H> &operator*=(Mat<T, W, H> &mat, T scalar) {
   }
   return mat;
 }
+
+#pragma endregion
+#pragma region Mat4f operators
+
+// Scale functions - modifies the matrix in place
+template <typename T>
+void Scale(Mat<T, 4, 4> &mat, T x, T y, T z) {
+  mat[0][0] *= x;
+  mat[0][1] *= x;
+  mat[0][2] *= x;
+  mat[0][3] *= x;
+
+  mat[1][0] *= y;
+  mat[1][1] *= y;
+  mat[1][2] *= y;
+  mat[1][3] *= y;
+
+  mat[2][0] *= z;
+  mat[2][1] *= z;
+  mat[2][2] *= z;
+  mat[2][3] *= z;
+}
+
+template <typename T>
+void Scale(Mat<T, 4, 4> &mat, const Vec<T, 3> &scale) {
+  Scale(mat, scale.x, scale.y, scale.z);
+}
+
+// Rotation from Euler angles (pitch, yaw, roll in radians)
+template <typename T>
+void RotateEuler(Mat<T, 4, 4> &mat, T pitch, T yaw, T roll) {
+  T cp = std::cos(pitch);
+  T sp = std::sin(pitch);
+  T cy = std::cos(yaw);
+  T sy = std::sin(yaw);
+  T cr = std::cos(roll);
+  T sr = std::sin(roll);
+
+  Mat<T, 4, 4> rotMatrix;
+  for (size_t i = 0; i < 4; ++i) {
+    for (size_t j = 0; j < 4; ++j) {
+      rotMatrix[i][j] = (i == j) ? T(1) : T(0);
+    }
+  }
+
+  // Rotation order: Yaw * Pitch * Roll (Y * X * Z)
+  rotMatrix[0][0] = cy * cr + sy * sp * sr;
+  rotMatrix[0][1] = sr * cp;
+  rotMatrix[0][2] = -sy * cr + cy * sp * sr;
+
+  rotMatrix[1][0] = -cy * sr + sy * sp * cr;
+  rotMatrix[1][1] = cr * cp;
+  rotMatrix[1][2] = sy * sr + cy * sp * cr;
+
+  rotMatrix[2][0] = sy * cp;
+  rotMatrix[2][1] = -sp;
+  rotMatrix[2][2] = cy * cp;
+
+  mat *= rotMatrix;
+}
+
+template <typename T>
+void RotateEuler(Mat<T, 4, 4> &mat, const Vec<T, 3> &euler) {
+  RotateEuler(mat, euler.x, euler.y, euler.z);
+}
+
+// Rotation from Mat3
+template <typename T>
+void Rotate(Mat<T, 4, 4> &mat, const Mat<T, 3, 3> &rot) {
+  Mat<T, 4, 4> rotMatrix;
+  for (size_t i = 0; i < 4; ++i) {
+    for (size_t j = 0; j < 4; ++j) {
+      rotMatrix[i][j] = (i == j) ? T(1) : T(0);
+    }
+  }
+
+  for (size_t i = 0; i < 3; ++i) {
+    for (size_t j = 0; j < 3; ++j) {
+      rotMatrix[i][j] = rot[i][j];
+    }
+  }
+
+  mat *= rotMatrix;
+}
+
+// Single axis rotations
+template <typename T>
+void RotateX(Mat<T, 4, 4> &mat, T angle) {
+  Mat<T, 4, 4> rotMatrix;
+  for (size_t i = 0; i < 4; ++i) {
+    for (size_t j = 0; j < 4; ++j) {
+      rotMatrix[i][j] = (i == j) ? T(1) : T(0);
+    }
+  }
+
+  T c             = std::cos(angle);
+  T s             = std::sin(angle);
+  rotMatrix[1][1] = c;
+  rotMatrix[1][2] = s;
+  rotMatrix[2][1] = -s;
+  rotMatrix[2][2] = c;
+
+  mat *= rotMatrix;
+}
+
+template <typename T>
+void RotateY(Mat<T, 4, 4> &mat, T angle) {
+  Mat<T, 4, 4> rotMatrix;
+  for (size_t i = 0; i < 4; ++i) {
+    for (size_t j = 0; j < 4; ++j) {
+      rotMatrix[i][j] = (i == j) ? T(1) : T(0);
+    }
+  }
+
+  T c             = std::cos(angle);
+  T s             = std::sin(angle);
+  rotMatrix[0][0] = c;
+  rotMatrix[0][2] = -s;
+  rotMatrix[2][0] = s;
+  rotMatrix[2][2] = c;
+
+  mat *= rotMatrix;
+}
+
+template <typename T>
+void RotateZ(Mat<T, 4, 4> &mat, T angle) {
+  Mat<T, 4, 4> rotMatrix;
+  for (size_t i = 0; i < 4; ++i) {
+    for (size_t j = 0; j < 4; ++j) {
+      rotMatrix[i][j] = (i == j) ? T(1) : T(0);
+    }
+  }
+
+  T c             = std::cos(angle);
+  T s             = std::sin(angle);
+  rotMatrix[0][0] = c;
+  rotMatrix[0][1] = s;
+  rotMatrix[1][0] = -s;
+  rotMatrix[1][1] = c;
+
+  mat *= rotMatrix;
+}
+#pragma endregion

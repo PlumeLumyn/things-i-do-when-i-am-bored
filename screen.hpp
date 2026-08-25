@@ -97,9 +97,13 @@ class Window {
       return y;
     }
 
+    void clearZBuffer() {
+      std::fill(zBuffer.begin(), zBuffer.end(), INFINITY);
+    }
+
     void clear() {
       std::fill(grid.begin(), grid.end(), ' ');
-      std::fill(zBuffer.begin(), zBuffer.end(), INFINITY);
+      clearZBuffer();
       for (auto &col : colGrid)
         col = { 0.6, 0.6, 0.9 };
     }

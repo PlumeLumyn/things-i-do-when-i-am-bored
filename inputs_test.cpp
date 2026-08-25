@@ -244,7 +244,7 @@ using Shader = std::function<bool(Vertex, Vec3f &)>;
 
 void drawTriangle(
     Screen::Window &window, std::array<Vertex, 3> &vertexData, Mat4f &transformMatrix,
-    Shader shader = nullptr) {
+    Shader shader = nullptr, Vec2f offset = { 0.0f, 0.0f }) {
   std::array<Vec4f, 3> t;
   t[0] = ProjectPoint(vertexData[0].pos, transformMatrix);
   t[1] = ProjectPoint(vertexData[1].pos, transformMatrix);
@@ -255,18 +255,25 @@ void drawTriangle(
     return;
   // Remove the overly aggressive Z clipping check
   // Only reject if ALL vertices are outside the same side
-  // if ((t[0][2] < -1.0f && t[1][2] < -1.0f && t[2][2] < -1.0f) || // All too close
-  //     (t[0][2] > 1.0f && t[1][2] > 1.0f && t[2][2] > 1.0f))      // All too far
-  //   return;
+  if ((t[0][2] < -1.0f && t[1][2] < -1.0f && t[2][2] < -1.0f) || // All too close
+      (t[0][2] > 1.0f && t[1][2] > 1.0f && t[2][2] > 1.0f))      // All too far
+    return;
 
-  Vec2i p0 = ToScreenCoords(t[0], window.getWidth(), window.getSubPixelHeight());
-  Vec2i p1 = ToScreenCoords(t[1], window.getWidth(), window.getSubPixelHeight());
-  Vec2i p2 = ToScreenCoords(t[2], window.getWidth(), window.getSubPixelHeight());
+  Vec2i iOffset = {
+    static_cast<int>(offset[0] * window.getSubPixelHeight()),
+    static_cast<int>(offset[1] * -window.getSubPixelHeight())
+  };
+  Vec2i p0 =
+      ToScreenCoords(t[0], window.getWidth(), window.getSubPixelHeight()) + iOffset;
+  Vec2i p1 =
+      ToScreenCoords(t[1], window.getWidth(), window.getSubPixelHeight()) + iOffset;
+  Vec2i p2 =
+      ToScreenCoords(t[2], window.getWidth(), window.getSubPixelHeight()) + iOffset;
 
   // Bounding box
-  int minX = std::max(0, std::min({ p0[0], p1[0], p2[0] }));
-  int maxX = std::min(window.getWidth() - 1, std::max({ p0[0], p1[0], p2[0] }));
-  int minY = std::max(0, std::min({ p0[1], p1[1], p2[1] }));
+  int minX = std::max(-1, std::min({ p0[0], p1[0], p2[0] }));
+  int maxX = std::min(window.getWidth(), std::max({ p0[0], p1[0], p2[0] }));
+  int minY = std::max(-1, std::min({ p0[1], p1[1], p2[1] }));
   int maxY = std::min(window.getSubPixelHeight() - 1, std::max({ p0[1], p1[1], p2[1] }));
 
   // Precompute for barycentric
@@ -298,7 +305,7 @@ void drawTriangle(
     bool isTop  = (from[1] == to[1]) && (to[0] < from[0]);
     bool isLeft = (to[1] > from[1]);
     // Top-left edges INCLUDE zero (draw on edge), others EXCLUDE zero (skip edge)
-    return (isTop || isLeft) ? 0.0f : 1e-6f;
+    return (isTop || isLeft) ? 0.0f : -1e-6f;
   };
 
   float bias0 = edgeBias(p1, p2);
@@ -586,15 +593,13 @@ int main(void) {
     sController.getWindow(windowId).clear();
     const float NEAR_CLIP = 0.0001;
     const float FAR_CLIP  = 20.0;
+    const float RATIO =
+        static_cast<float>(sController.getWindow(windowId).getWidth()) /
+        static_cast<float>(sController.getWindow(windowId).getSubPixelHeight());
 
     viewMatrix       = BuildViewMatrix(pos + camera, cameraAngle);
     float fovY       = 80.0f * (M_PI / 180.0f); // 30 degrees in radians
-    projectionMatrix = BuildProjectionMatrix(
-        fovY,
-        static_cast<float>(sController.getWindow(windowId).getWidth()) /
-            static_cast<float>(sController.getWindow(windowId).getSubPixelHeight()),
-        NEAR_CLIP,
-        FAR_CLIP);
+    projectionMatrix = BuildProjectionMatrix(fovY, RATIO, NEAR_CLIP, FAR_CLIP);
 
     Mat4f vpMatrix = MatMul(projectionMatrix, viewMatrix);
 
@@ -759,6 +764,7 @@ int main(void) {
                 if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
                 if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
                 if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
+                if (fragColor[2] < 0.0f) fragColor[2] = 0.0f;
 
                 return true;
               }); // base color
@@ -766,16 +772,16 @@ int main(void) {
       }
     }
     if (closestBlock) {
+      modelMatrix[0][3]     = closestBlock->position[0];
+      modelMatrix[1][3]     = closestBlock->position[1];
+      modelMatrix[2][3]     = closestBlock->position[2];
+      Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
       for (size_t k = 0; k < cube.size() / 3; k++) {
         std::array<Vertex, 3> vertexData;
         vertexData[0] = cube[k * 3];
         vertexData[1] = cube[k * 3 + 1];
         vertexData[2] = cube[k * 3 + 2];
 
-        modelMatrix[0][3]     = closestBlock->position[0];
-        modelMatrix[1][3]     = closestBlock->position[1];
-        modelMatrix[2][3]     = closestBlock->position[2];
-        Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
         drawTriangle(
             sController.getWindow(windowId),
             vertexData,
@@ -830,6 +836,126 @@ int main(void) {
       }
       if (actBreak) {
         removeBlockToChunkCollection(chunks, *closestBlock);
+      }
+    }
+
+    sController.getWindow(windowId).clearZBuffer();
+    /// TODO: UI first to gain pixel draws
+    /// UI Camera
+
+    viewMatrix = BuildViewMatrix(Vec3f { 0, 0, 0 }, Vec3f { 0, 0, 0 });
+    vpMatrix   = MatMul(projectionMatrix, viewMatrix);
+
+    modelMatrix = identity<float, 4, 4>();
+    Scale(modelMatrix, 0.1f, 0.1f, 1.0f);
+    modelMatrix[0][3]     = 0;
+    modelMatrix[1][3]     = 0;
+    modelMatrix[2][3]     = -0.001;
+    Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
+    for (size_t k = 0; k < 2; k++) {
+      std::array<Vertex, 3> vertexData;
+      vertexData[0] = cube[k * 3];
+      vertexData[1] = cube[k * 3 + 1];
+      vertexData[2] = cube[k * 3 + 2];
+
+      drawTriangle(
+          sController.getWindow(windowId),
+          vertexData,
+          transformMatrix,
+          [](Vertex v, Vec3f &fragColor) {
+            Vec2f uv  = v.uv - Vec2f { 0.5f, 0.5f };
+            fragColor = { 1.0f, 1.0f, 1.0f };
+            if (uv[0] < 0.5 && uv[0] > -0.5 && uv[1] < 0.05 && uv[1] > -0.05) return true;
+            if (uv[0] < 0.05 && uv[0] > -0.05 && uv[1] < 0.5 && uv[1] > -0.5) return true;
+            return false;
+          }); // base color
+    }
+
+    /// Draw toolbar
+    modelMatrix       = identity<float, 4, 4>();
+    const float SCALE = 0.1f;
+    Scale(modelMatrix, SCALE, SCALE, 1.0f);
+    modelMatrix[2][3] = -0.001;
+    modelMatrix[1][3] = -3.5 * SCALE;
+    for (size_t i = 0; i < 10; i++) {
+      modelMatrix[0][3]     = (i - 4.5f) * SCALE;
+      Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
+      for (size_t k = 0; k < 2; k++) {
+        std::array<Vertex, 3> vertexData;
+        vertexData[0] = cube[k * 3];
+        vertexData[1] = cube[k * 3 + 1];
+        vertexData[2] = cube[k * 3 + 2];
+
+        bool selected = id == i;
+        drawTriangle(
+            sController.getWindow(windowId),
+            vertexData,
+            transformMatrix,
+            [selected](Vertex v, Vec3f &fragColor) {
+              Vec2f uv         = v.uv;
+              const Image &tex = textures[1];
+              int texX         = static_cast<int>(v.uv[0] * (tex.width)) % tex.width;
+              int texY         = static_cast<int>(v.uv[1] * (tex.height)) % tex.height;
+              int texIndex     = (texY * tex.width + texX) * tex.channels;
+              fragColor        = {
+                tex.data[texIndex] / 255.0f,
+                tex.data[texIndex] / 255.0f,
+                tex.data[texIndex] / 255.0f,
+              };
+              fragColor = fragColor * Vec3f { 2.0f, 2.0f, 2.0f };
+              if (!selected) fragColor = fragColor * 0.45f;
+              if (uv[0] <= 0.90 && uv[1] <= 0.90 && uv[0] >= 0.1 && uv[1] >= 0.1) {
+                fragColor = fragColor * 0.6f;
+              }
+              return true;
+            }); // base color
+      }
+    }
+
+    sController.getWindow(windowId).clearZBuffer();
+    /// Draw toolbar items
+    modelMatrix = identity<float, 4, 4>();
+    RotateX(modelMatrix, static_cast<float>(-M_PI_4f));
+    RotateY(modelMatrix, static_cast<float>(M_PI_4));
+    modelMatrix[2][3] = -8.0;
+    // modelMatrix[1][3] = -3.5 * SCALE;
+    for (size_t i = 0; i < 10 && i < blockDatas.size(); i++) {
+      // modelMatrix[0][3]     = (i - 5.0f) * SCALE;
+      Mat4f transformMatrix = MatMul(vpMatrix, modelMatrix);
+      for (size_t k = 0; k < cube.size() / 3; k++) {
+        std::array<Vertex, 3> vertexData;
+        vertexData[0]    = cube[k * 3];
+        vertexData[1]    = cube[k * 3 + 1];
+        vertexData[2]    = cube[k * 3 + 2];
+        const Image &tex = blockDatas[i][k / 2];
+        float light      = DotProduct(
+            Normalize(vertexData[0].normal), Normalize(Vec3f { 0.0f, -2.0f, -1.0f }));
+        drawTriangle(
+            sController.getWindow(windowId),
+            vertexData,
+            transformMatrix,
+            [&tex, &light](Vertex v, Vec3f &fragColor) {
+              int texX     = static_cast<int>(v.uv[0] * (tex.width)) % tex.width;
+              int texY     = static_cast<int>(v.uv[1] * (tex.height)) % tex.height;
+              int texIndex = (texY * tex.width + texX) * tex.channels;
+              fragColor    = {
+                tex.data[texIndex] / 255.0f,
+                tex.data[texIndex + 1] / 255.0f,
+                tex.data[texIndex + 2] / 255.0f
+              };
+              float lightPow = 0.5f + light * light;
+              fragColor *= lightPow;
+
+              if (fragColor[0] > 1.0f) fragColor[0] = 1.0f;
+              if (fragColor[1] > 1.0f) fragColor[1] = 1.0f;
+              if (fragColor[2] > 1.0f) fragColor[2] = 1.0f;
+              if (fragColor[0] < 0.0f) fragColor[0] = 0.0f;
+              if (fragColor[1] < 0.0f) fragColor[1] = 0.0f;
+              if (fragColor[2] < 0.0f) fragColor[2] = 0.0f;
+
+              return true;
+            },
+            { (i - 4.5f) * SCALE * 1.2f, -4.2f * SCALE }); // base color
       }
     }
 
