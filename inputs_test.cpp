@@ -241,100 +241,215 @@ void drawLine(Screen::Window &w, Vec4f o, Vec4f d, Vec3f col = { 1.0, 1.0, 1.0 }
 }
 
 using Shader = std::function<bool(Vertex, Vec3f &)>;
+bool isInsidePlane(const Vec4f &clipPos, int plane) {
+  switch (plane) {
+  case 0:
+    return clipPos[0] >= -clipPos[3]; // Left
+  case 1:
+    return clipPos[0] <= clipPos[3]; // Right
+  case 2:
+    return clipPos[1] >= -clipPos[3]; // Bottom
+  case 3:
+    return clipPos[1] <= clipPos[3]; // Top
+  case 4:
+    return clipPos[2] >= -clipPos[3]; // Near
+  case 5:
+    return clipPos[2] <= clipPos[3]; // Far
+  default:
+    return true;
+  }
+}
+
+// Interpolate between two vertices in clip space
+float computePlaneIntersection(const Vec4f &p1, const Vec4f &p2, int plane) {
+  float d1, d2;
+  switch (plane) {
+  case 0:
+    d1 = p1[3] + p1[0];
+    d2 = p2[3] + p2[0];
+    break; // Left
+  case 1:
+    d1 = p1[3] - p1[0];
+    d2 = p2[3] - p2[0];
+    break; // Right
+  case 2:
+    d1 = p1[3] + p1[1];
+    d2 = p2[3] + p2[1];
+    break; // Bottom
+  case 3:
+    d1 = p1[3] - p1[1];
+    d2 = p2[3] - p2[1];
+    break; // Top
+  case 4:
+    d1 = p1[3] + p1[2];
+    d2 = p2[3] + p2[2];
+    break; // Near
+  case 5:
+    d1 = p1[3] - p1[2];
+    d2 = p2[3] - p2[2];
+    break; // Far
+  default:
+    return 0.0f;
+  }
+  if (std::abs(d1 - d2) < 1e-6f) return 0.0f;
+  return d1 / (d1 - d2);
+}
+
+Vertex lerpVertex(const Vertex &v1, const Vertex &v2, float t) {
+  Vertex result;
+  result.pos    = v1.pos * (1.0f - t) + v2.pos * t;
+  result.uv     = v1.uv * (1.0f - t) + v2.uv * t;
+  result.normal = v1.normal * (1.0f - t) + v2.normal * t;
+  return result;
+}
+
+// Sutherland-Hodgman clipping against one plane
+void clipAgainstPlane(
+    std::vector<Vertex> &vertices, std::vector<Vec4f> &clipPositions, int plane) {
+
+  std::vector<Vertex> outVerts;
+  std::vector<Vec4f> outClip;
+
+  for (size_t i = 0; i < vertices.size(); i++) {
+    size_t j = (i + 1) % vertices.size();
+
+    bool in1 = isInsidePlane(clipPositions[i], plane);
+    bool in2 = isInsidePlane(clipPositions[j], plane);
+
+    if (in1 && in2) {
+      // Both inside
+      outVerts.push_back(vertices[j]);
+      outClip.push_back(clipPositions[j]);
+    } else if (in1 && !in2) {
+      // Exiting: add intersection
+      float t = computePlaneIntersection(clipPositions[i], clipPositions[j], plane);
+      outVerts.push_back(lerpVertex(vertices[i], vertices[j], t));
+      outClip.push_back(clipPositions[i] * (1.0f - t) + clipPositions[j] * t);
+    } else if (!in1 && in2) {
+      // Entering: add intersection + vertex j
+      float t = computePlaneIntersection(clipPositions[i], clipPositions[j], plane);
+      outVerts.push_back(lerpVertex(vertices[i], vertices[j], t));
+      outClip.push_back(clipPositions[i] * (1.0f - t) + clipPositions[j] * t);
+      outVerts.push_back(vertices[j]);
+      outClip.push_back(clipPositions[j]);
+    }
+  }
+
+  vertices      = outVerts;
+  clipPositions = outClip;
+}
 
 void drawTriangle(
     Screen::Window &window, std::array<Vertex, 3> &vertexData, Mat4f &transformMatrix,
     Shader shader = nullptr, Vec2f offset = { 0.0f, 0.0f }) {
-  std::array<Vec4f, 3> t;
-  t[0] = ProjectPoint(vertexData[0].pos, transformMatrix);
-  t[1] = ProjectPoint(vertexData[1].pos, transformMatrix);
-  t[2] = ProjectPoint(vertexData[2].pos, transformMatrix);
-  // After perspective divide, Z is in NDC range -1 to +1
-  // Also check W was positive (point was in front of camera)
-  if (t[0][3] <= 0 || t[1][3] <= 0 || t[2][3] <= 0) // Behind camera
-    return;
-  // Remove the overly aggressive Z clipping check
-  // Only reject if ALL vertices are outside the same side
-  if ((t[0][2] < -1.0f && t[1][2] < -1.0f && t[2][2] < -1.0f) || // All too close
-      (t[0][2] > 1.0f && t[1][2] > 1.0f && t[2][2] > 1.0f))      // All too far
-    return;
+  // Transform to clip space (NO perspective divide yet)
+  std::array<Vec4f, 3> clipSpace;
+  clipSpace[0] = ToClipSpace(vertexData[0].pos, transformMatrix);
+  clipSpace[1] = ToClipSpace(vertexData[1].pos, transformMatrix);
+  clipSpace[2] = ToClipSpace(vertexData[2].pos, transformMatrix);
 
-  Vec2i iOffset = {
-    static_cast<int>(offset[0] * window.getSubPixelHeight()),
-    static_cast<int>(offset[1] * -window.getSubPixelHeight())
-  };
-  Vec2i p0 =
-      ToScreenCoords(t[0], window.getWidth(), window.getSubPixelHeight()) + iOffset;
-  Vec2i p1 =
-      ToScreenCoords(t[1], window.getWidth(), window.getSubPixelHeight()) + iOffset;
-  Vec2i p2 =
-      ToScreenCoords(t[2], window.getWidth(), window.getSubPixelHeight()) + iOffset;
+  // Start with original triangle
+  std::vector<Vertex> vertices     = { vertexData[0], vertexData[1], vertexData[2] };
+  std::vector<Vec4f> clipPositions = { clipSpace[0], clipSpace[1], clipSpace[2] };
 
-  // Bounding box
-  int minX = std::max(-1, std::min({ p0[0], p1[0], p2[0] }));
-  int maxX = std::min(window.getWidth(), std::max({ p0[0], p1[0], p2[0] }));
-  int minY = std::max(-1, std::min({ p0[1], p1[1], p2[1] }));
-  int maxY = std::min(window.getSubPixelHeight() - 1, std::max({ p0[1], p1[1], p2[1] }));
-
-  // Precompute for barycentric
-  float denom = (p1[1] - p2[1]) * (p0[0] - p2[0]) + (p2[0] - p1[0]) * (p0[1] - p2[1]);
-  if (std::abs(denom) < 1e-6f) return; // Degenerate triangle
-
-  float invDenom = 1.0f / denom;
-
-  Vec3f invW, z;
-  std::array<Vec2f, 3> uv_w;
-  std::array<Vec3f, 3> normal_w;
-  Vertex v;
-
-  for (size_t i = 0; i < 3; i++) {
-    // Perspective-correct interpolation: store 1/w
-    invW[i] = 1.0f / t[i][3];
-
-    // Depth values (z/w for depth buffer)
-    z[i] = t[i][2] * invW[i];
-
-    // Datas divided by w for perspective-correct interpolation
-    uv_w[i]     = vertexData[i].uv * invW[i];
-    normal_w[i] = vertexData[i].normal * invW[i];
+  // Clip against all 6 frustum planes
+  for (int plane = 0; plane < 6; plane++) {
+    if (vertices.size() < 3) return; // Completely clipped
+    clipAgainstPlane(vertices, clipPositions, plane);
   }
 
-  auto edgeBias = [](const Vec2i &from, const Vec2i &to) -> float {
-    // Top edge: horizontal edge going left (to.x < from.x)
-    // Left edge: edge going down (to.y > from.y)
-    bool isTop  = (from[1] == to[1]) && (to[0] < from[0]);
-    bool isLeft = (to[1] > from[1]);
-    // Top-left edges INCLUDE zero (draw on edge), others EXCLUDE zero (skip edge)
-    return (isTop || isLeft) ? 0.0f : -1e-6f;
-  };
+  if (vertices.size() < 3) return;
 
-  float bias0 = edgeBias(p1, p2);
-  float bias1 = edgeBias(p2, p0);
-  float bias2 = edgeBias(p0, p1);
+  for (size_t i = 1; i + 1 < vertices.size(); i++) {
+    std::array<Vertex, 3> tri  = { vertices[0], vertices[i], vertices[i + 1] };
+    std::array<Vec4f, 3> tClip = {
+      clipPositions[0], clipPositions[i], clipPositions[i + 1]
+    };
 
-  for (int y = minY; y <= maxY; ++y) {
-    for (int x = minX; x <= maxX; ++x) {
-      Vec3f w;
-      w[0] = ((p1[1] - p2[1]) * (x - p2[0]) + (p2[0] - p1[0]) * (y - p2[1])) * invDenom;
-      w[1] = ((p2[1] - p0[1]) * (x - p2[0]) + (p0[0] - p2[0]) * (y - p2[1])) * invDenom;
-      w[2] = 1.0f - w[0] - w[1];
+    // NOW do perspective divide to get NDC
+    std::array<Vec4f, 3> t;
+    for (int v = 0; v < 3; v++) {
+      Vec3f ndc = ToNDC(tClip[v]);
+      t[v]      = Vec4f { ndc[0], ndc[1], ndc[2], tClip[v][3] };
+    }
+    Vec2i iOffset = {
+      static_cast<int>(offset[0] * window.getSubPixelHeight()),
+      static_cast<int>(offset[1] * -window.getSubPixelHeight())
+    };
+    Vec2i p0 =
+        ToScreenCoords(t[0], window.getWidth(), window.getSubPixelHeight()) + iOffset;
+    Vec2i p1 =
+        ToScreenCoords(t[1], window.getWidth(), window.getSubPixelHeight()) + iOffset;
+    Vec2i p2 =
+        ToScreenCoords(t[2], window.getWidth(), window.getSubPixelHeight()) + iOffset;
 
-      // Reject if outside OR on a non-owned edge
-      if (w[0] < bias0 || w[1] < bias1 || w[2] < bias2) continue;
+    // Bounding box
+    int minX = std::max(-1, std::min({ p0[0], p1[0], p2[0] }));
+    int maxX = std::min(window.getWidth(), std::max({ p0[0], p1[0], p2[0] }));
+    int minY = std::max(-1, std::min({ p0[1], p1[1], p2[1] }));
+    int maxY =
+        std::min(window.getSubPixelHeight() - 1, std::max({ p0[1], p1[1], p2[1] }));
 
-      // Interpolate depth
-      float localZ    = w[0] * z[0] + w[1] * z[1] + w[2] * z[2];
-      float localInvW = w[0] * invW[0] + w[1] * invW[1] + w[2] * invW[2];
+    // Precompute for barycentric
+    float denom = (p1[1] - p2[1]) * (p0[0] - p2[0]) + (p2[0] - p1[0]) * (p0[1] - p2[1]);
+    if (std::abs(denom) < 1e-6f) return; // Degenerate triangle
 
-      // // Perspective-correct UV interpolation
-      v.pos = { static_cast<float>(x), static_cast<float>(y), localZ };
-      v.uv  = (w[0] * uv_w[0] + w[1] * uv_w[1] + w[2] * uv_w[2]) / localInvW;
-      v.normal =
-          (w[0] * normal_w[0] + w[1] * normal_w[1] + w[2] * normal_w[2]) / localInvW;
+    float invDenom = 1.0f / denom;
 
-      if (shader) {
-        Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
-        if (shader(v, fragColor)) window.putPixel(x, y, -localZ, fragColor);
+    Vec3f invW, z;
+    std::array<Vec2f, 3> uv_w;
+    std::array<Vec3f, 3> normal_w;
+    Vertex v;
+
+    for (size_t i = 0; i < 3; i++) {
+      // Perspective-correct interpolation: store 1/w
+      invW[i] = 1.0f / t[i][3];
+
+      // Depth values (z/w for depth buffer)
+      z[i] = t[i][2] * invW[i];
+
+      // Datas divided by w for perspective-correct interpolation
+      uv_w[i]     = tri[i].uv * invW[i];
+      normal_w[i] = tri[i].normal * invW[i];
+    }
+
+    auto edgeBias = [](const Vec2i &from, const Vec2i &to) -> float {
+      // Top edge: horizontal edge going left (to.x < from.x)
+      // Left edge: edge going down (to.y > from.y)
+      bool isTop  = (from[1] == to[1]) && (to[0] < from[0]);
+      bool isLeft = (to[1] > from[1]);
+      // Top-left edges INCLUDE zero (draw on edge), others EXCLUDE zero (skip edge)
+      return (isTop || isLeft) ? 0.0f : -1e-6f;
+    };
+
+    float bias0 = edgeBias(p1, p2);
+    float bias1 = edgeBias(p2, p0);
+    float bias2 = edgeBias(p0, p1);
+
+    for (int y = minY; y <= maxY; ++y) {
+      for (int x = minX; x <= maxX; ++x) {
+        Vec3f w;
+        w[0] = ((p1[1] - p2[1]) * (x - p2[0]) + (p2[0] - p1[0]) * (y - p2[1])) * invDenom;
+        w[1] = ((p2[1] - p0[1]) * (x - p2[0]) + (p0[0] - p2[0]) * (y - p2[1])) * invDenom;
+        w[2] = 1.0f - w[0] - w[1];
+
+        // Reject if outside OR on a non-owned edge
+        if (w[0] < bias0 || w[1] < bias1 || w[2] < bias2) continue;
+
+        // Interpolate depth
+        float localZ    = w[0] * z[0] + w[1] * z[1] + w[2] * z[2];
+        float localInvW = w[0] * invW[0] + w[1] * invW[1] + w[2] * invW[2];
+
+        // // Perspective-correct UV interpolation
+        v.pos = { static_cast<float>(x), static_cast<float>(y), localZ };
+        v.uv  = (w[0] * uv_w[0] + w[1] * uv_w[1] + w[2] * uv_w[2]) / localInvW;
+        v.normal =
+            (w[0] * normal_w[0] + w[1] * normal_w[1] + w[2] * normal_w[2]) / localInvW;
+
+        if (shader) {
+          Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
+          if (shader(v, fragColor)) window.putPixel(x, y, -localZ, fragColor);
+        }
       }
     }
   }

@@ -249,17 +249,18 @@ inline Mat4f BuildProjectionMatrix(float fovRad, float aspect, float near, float
   };
 }
 
-inline Vec4f ProjectPoint(Vec3f &p, Mat4f &transformMatrix) {
-  Vec4f R;
-  Vec4f p4 = { p[0], p[1], p[2], 1 };
-  MatrixVectorMult(transformMatrix, p4, R);
+inline Vec4f ToClipSpace(Vec3f &p, Mat4f &transformMatrix) {
+  Vec4f p4 = { p[0], p[1], p[2], 1.0f };
+  Vec4f clipSpace;
+  MatrixVectorMult(transformMatrix, p4, clipSpace);
+  return clipSpace; // Return homogeneous coordinates (x, y, z, w)
+}
 
-  // Perspective divide
+inline Vec3f ToNDC(Vec4f &clipSpace) {
   return {
-    R[0] / R[3], // NDC x: -1 to +1
-    R[1] / R[3], // NDC y: -1 to +1
-    R[2] / R[3], // NDC z: -1 to +1 (depth)
-    R[3]         // Keep W for clipping tests
+    clipSpace[0] / clipSpace[3], // NDC x: -1 to +1
+    clipSpace[1] / clipSpace[3], // NDC y: -1 to +1
+    clipSpace[2] / clipSpace[3]  // NDC z: -1 to +1 (depth)
   };
 }
 
