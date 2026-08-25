@@ -80,7 +80,7 @@ constexpr int CHUNK_SIZE      = 16;
 Image loadTexture(const std::string &path) {
   Image tex;
   int texWidth, texHeight, texChannels;
-  unsigned char *data = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, 0);
+  unsigned char *data = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, 4);
   if (!data) {
     std::cerr << "Failed to load texture: " << path << std::endl;
     return { 0, 0, 0, nullptr };
@@ -339,6 +339,98 @@ void clipAgainstPlane(
   clipPositions = outClip;
 }
 
+void drawTriangleRasterize(
+    Screen::Window &window, std::array<Vertex, 3> &tri, std::array<Vec4f, 3> &tClip,
+    Shader shader = nullptr, Vec2f offset = { 0.0f, 0.0f }) {
+  // Perspective divide to NDC
+  std::array<Vec4f, 3> t;
+  for (int v = 0; v < 3; v++) {
+    Vec3f ndc = ToNDC(tClip[v]);
+    t[v]      = Vec4f { ndc[0], ndc[1], ndc[2], tClip[v][3] };
+  }
+
+  Vec2i iOffset = {
+    static_cast<int>(offset[0] * window.getSubPixelHeight()),
+    static_cast<int>(offset[1] * -window.getSubPixelHeight())
+  };
+
+  Vec2i p0 =
+      ToScreenCoords(t[0], window.getWidth(), window.getSubPixelHeight()) + iOffset;
+  Vec2i p1 =
+      ToScreenCoords(t[1], window.getWidth(), window.getSubPixelHeight()) + iOffset;
+  Vec2i p2 =
+      ToScreenCoords(t[2], window.getWidth(), window.getSubPixelHeight()) + iOffset;
+
+  // Bounding box
+  int minX = std::max(-1, std::min({ p0[0], p1[0], p2[0] }));
+  int maxX = std::min(window.getWidth(), std::max({ p0[0], p1[0], p2[0] }));
+  int minY = std::max(-1, std::min({ p0[1], p1[1], p2[1] }));
+  int maxY = std::min(window.getSubPixelHeight() - 1, std::max({ p0[1], p1[1], p2[1] }));
+
+  // Precompute for barycentric
+  float denom = (p1[1] - p2[1]) * (p0[0] - p2[0]) + (p2[0] - p1[0]) * (p0[1] - p2[1]);
+  if (std::abs(denom) < 1e-6f) return; // Degenerate triangle
+
+  float invDenom = 1.0f / denom;
+
+  Vec3f invW, z;
+  std::array<Vec2f, 3> uv_w;
+  std::array<Vec3f, 3> normal_w;
+  Vertex v;
+
+  for (size_t i = 0; i < 3; i++) {
+    // Perspective-correct interpolation: store 1/w
+    invW[i] = 1.0f / t[i][3];
+
+    // Depth values (z/w for depth buffer)
+    z[i] = t[i][2] * invW[i];
+
+    // Datas divided by w for perspective-correct interpolation
+    uv_w[i]     = tri[i].uv * invW[i];
+    normal_w[i] = tri[i].normal * invW[i];
+  }
+
+  auto edgeBias = [](const Vec2i &from, const Vec2i &to) -> float {
+    // Top edge: horizontal edge going left (to.x < from.x)
+    // Left edge: edge going down (to.y > from.y)
+    bool isTop  = (from[1] == to[1]) && (to[0] < from[0]);
+    bool isLeft = (to[1] > from[1]);
+    // Top-left edges INCLUDE zero (draw on edge), others EXCLUDE zero (skip edge)
+    return (isTop || isLeft) ? 0.0f : -1e-3f;
+  };
+
+  float bias0 = edgeBias(p1, p2);
+  float bias1 = edgeBias(p2, p0);
+  float bias2 = edgeBias(p0, p1);
+
+  for (int y = minY; y <= maxY; ++y) {
+    for (int x = minX; x <= maxX; ++x) {
+      Vec3f w;
+      w[0] = ((p1[1] - p2[1]) * (x - p2[0]) + (p2[0] - p1[0]) * (y - p2[1])) * invDenom;
+      w[1] = ((p2[1] - p0[1]) * (x - p2[0]) + (p0[0] - p2[0]) * (y - p2[1])) * invDenom;
+      w[2] = 1.0f - w[0] - w[1];
+
+      // Reject if outside OR on a non-owned edge
+      if (w[0] < bias0 || w[1] < bias1 || w[2] < bias2) continue;
+
+      // Interpolate depth
+      float localZ    = w[0] * z[0] + w[1] * z[1] + w[2] * z[2];
+      float localInvW = w[0] * invW[0] + w[1] * invW[1] + w[2] * invW[2];
+
+      // // Perspective-correct UV interpolation
+      v.pos = { static_cast<float>(x), static_cast<float>(y), localZ };
+      v.uv  = (w[0] * uv_w[0] + w[1] * uv_w[1] + w[2] * uv_w[2]) / localInvW;
+      v.normal =
+          (w[0] * normal_w[0] + w[1] * normal_w[1] + w[2] * normal_w[2]) / localInvW;
+
+      if (shader) {
+        Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
+        if (shader(v, fragColor)) window.putPixel(x, y, -localZ, fragColor);
+      }
+    }
+  }
+}
+
 void drawTriangle(
     Screen::Window &window, std::array<Vertex, 3> &vertexData, Mat4f &transformMatrix,
     Shader shader = nullptr, Vec2f offset = { 0.0f, 0.0f }) {
@@ -348,17 +440,33 @@ void drawTriangle(
   clipSpace[1] = ToClipSpace(vertexData[1].pos, transformMatrix);
   clipSpace[2] = ToClipSpace(vertexData[2].pos, transformMatrix);
 
-  // Start with original triangle
+  // Fast path: check if triangle is completely inside frustum
+  bool needsClipping = false;
+  for (int i = 0; i < 3; i++) {
+    const Vec4f &c = clipSpace[i];
+    if (c[0] < -c[3] || c[0] > c[3] || // Left/Right
+        c[1] < -c[3] || c[1] > c[3] || // Bottom/Top
+        c[2] < -c[3] || c[2] > c[3]) { // Near/Far
+      needsClipping = true;
+      break;
+    }
+  }
+
+  // Fast path: no clipping needed
+  if (!needsClipping) {
+    drawTriangleRasterize(window, vertexData, clipSpace, shader, offset);
+    return;
+  }
+
+  // Slow path: clip the triangle
   std::vector<Vertex> vertices     = { vertexData[0], vertexData[1], vertexData[2] };
   std::vector<Vec4f> clipPositions = { clipSpace[0], clipSpace[1], clipSpace[2] };
 
   // Clip against all 6 frustum planes
   for (int plane = 0; plane < 6; plane++) {
-    if (vertices.size() < 3) return; // Completely clipped
     clipAgainstPlane(vertices, clipPositions, plane);
+    if (vertices.size() < 3) return; // Completely clipped
   }
-
-  if (vertices.size() < 3) return;
 
   for (size_t i = 1; i + 1 < vertices.size(); i++) {
     std::array<Vertex, 3> tri  = { vertices[0], vertices[i], vertices[i + 1] };
@@ -366,92 +474,7 @@ void drawTriangle(
       clipPositions[0], clipPositions[i], clipPositions[i + 1]
     };
 
-    // NOW do perspective divide to get NDC
-    std::array<Vec4f, 3> t;
-    for (int v = 0; v < 3; v++) {
-      Vec3f ndc = ToNDC(tClip[v]);
-      t[v]      = Vec4f { ndc[0], ndc[1], ndc[2], tClip[v][3] };
-    }
-    Vec2i iOffset = {
-      static_cast<int>(offset[0] * window.getSubPixelHeight()),
-      static_cast<int>(offset[1] * -window.getSubPixelHeight())
-    };
-    Vec2i p0 =
-        ToScreenCoords(t[0], window.getWidth(), window.getSubPixelHeight()) + iOffset;
-    Vec2i p1 =
-        ToScreenCoords(t[1], window.getWidth(), window.getSubPixelHeight()) + iOffset;
-    Vec2i p2 =
-        ToScreenCoords(t[2], window.getWidth(), window.getSubPixelHeight()) + iOffset;
-
-    // Bounding box
-    int minX = std::max(-1, std::min({ p0[0], p1[0], p2[0] }));
-    int maxX = std::min(window.getWidth(), std::max({ p0[0], p1[0], p2[0] }));
-    int minY = std::max(-1, std::min({ p0[1], p1[1], p2[1] }));
-    int maxY =
-        std::min(window.getSubPixelHeight() - 1, std::max({ p0[1], p1[1], p2[1] }));
-
-    // Precompute for barycentric
-    float denom = (p1[1] - p2[1]) * (p0[0] - p2[0]) + (p2[0] - p1[0]) * (p0[1] - p2[1]);
-    if (std::abs(denom) < 1e-6f) return; // Degenerate triangle
-
-    float invDenom = 1.0f / denom;
-
-    Vec3f invW, z;
-    std::array<Vec2f, 3> uv_w;
-    std::array<Vec3f, 3> normal_w;
-    Vertex v;
-
-    for (size_t i = 0; i < 3; i++) {
-      // Perspective-correct interpolation: store 1/w
-      invW[i] = 1.0f / t[i][3];
-
-      // Depth values (z/w for depth buffer)
-      z[i] = t[i][2] * invW[i];
-
-      // Datas divided by w for perspective-correct interpolation
-      uv_w[i]     = tri[i].uv * invW[i];
-      normal_w[i] = tri[i].normal * invW[i];
-    }
-
-    auto edgeBias = [](const Vec2i &from, const Vec2i &to) -> float {
-      // Top edge: horizontal edge going left (to.x < from.x)
-      // Left edge: edge going down (to.y > from.y)
-      bool isTop  = (from[1] == to[1]) && (to[0] < from[0]);
-      bool isLeft = (to[1] > from[1]);
-      // Top-left edges INCLUDE zero (draw on edge), others EXCLUDE zero (skip edge)
-      return (isTop || isLeft) ? 0.0f : -1e-6f;
-    };
-
-    float bias0 = edgeBias(p1, p2);
-    float bias1 = edgeBias(p2, p0);
-    float bias2 = edgeBias(p0, p1);
-
-    for (int y = minY; y <= maxY; ++y) {
-      for (int x = minX; x <= maxX; ++x) {
-        Vec3f w;
-        w[0] = ((p1[1] - p2[1]) * (x - p2[0]) + (p2[0] - p1[0]) * (y - p2[1])) * invDenom;
-        w[1] = ((p2[1] - p0[1]) * (x - p2[0]) + (p0[0] - p2[0]) * (y - p2[1])) * invDenom;
-        w[2] = 1.0f - w[0] - w[1];
-
-        // Reject if outside OR on a non-owned edge
-        if (w[0] < bias0 || w[1] < bias1 || w[2] < bias2) continue;
-
-        // Interpolate depth
-        float localZ    = w[0] * z[0] + w[1] * z[1] + w[2] * z[2];
-        float localInvW = w[0] * invW[0] + w[1] * invW[1] + w[2] * invW[2];
-
-        // // Perspective-correct UV interpolation
-        v.pos = { static_cast<float>(x), static_cast<float>(y), localZ };
-        v.uv  = (w[0] * uv_w[0] + w[1] * uv_w[1] + w[2] * uv_w[2]) / localInvW;
-        v.normal =
-            (w[0] * normal_w[0] + w[1] * normal_w[1] + w[2] * normal_w[2]) / localInvW;
-
-        if (shader) {
-          Vec3f fragColor = { 1.0f, 1.0f, 1.0f };
-          if (shader(v, fragColor)) window.putPixel(x, y, -localZ, fragColor);
-        }
-      }
-    }
+    drawTriangleRasterize(window, tri, tClip, shader, offset);
   }
 }
 
@@ -463,6 +486,8 @@ const std::array textures = {
   loadTexture("./textures/oak_log.png"),
   loadTexture("./textures/oak_log_top.png"),
   loadTexture("./textures/oak_planks.png"),
+  loadTexture("./textures/stone.png"),
+  loadTexture("./textures/leaves.png"),
 };
 const std::array blockDatas = {
   BlockData {
@@ -505,6 +530,22 @@ const std::array blockDatas = {
              .back   = textures[4],
              .bottom = textures[5],
              },
+  BlockData {
+             .top    = textures[7],
+             .left   = textures[7],
+             .right  = textures[7],
+             .front  = textures[7],
+             .back   = textures[7],
+             .bottom = textures[7],
+             },
+  BlockData {
+             .top    = textures[8],
+             .left   = textures[8],
+             .right  = textures[8],
+             .front  = textures[8],
+             .back   = textures[8],
+             .bottom = textures[8],
+             },
 };
 
 const std::array blockDisplaces {
@@ -528,7 +569,7 @@ int main(void) {
       float noise = snoise(uv);
       float depth = noise * (CLIFF_PERCENT / 2.0f) + (1.0f - CLIFF_PERCENT / 2.0f);
       for (int z = 0; z < depth * WORLD_HEIGHT; z++) {
-        int id = 0;
+        int id = 5;
 
         if (z + 1 >= depth * WORLD_HEIGHT) {
           id = 1;
@@ -859,10 +900,14 @@ int main(void) {
               vertexData,
               transformMatrix,
               [&tex, &light](Vertex v, Vec3f &fragColor) {
-                int texX     = static_cast<int>(v.uv[0] * (tex.width)) % tex.width;
-                int texY     = static_cast<int>(v.uv[1] * (tex.height)) % tex.height;
-                int texIndex = (texY * tex.width + texX) * tex.channels;
-                fragColor    = {
+                int texX = std::max(
+                    std::min(static_cast<int>(v.uv[0] * (tex.width)), tex.width - 1), 0);
+                int texY = std::max(
+                    std::min(static_cast<int>(v.uv[1] * (tex.height)), tex.height - 1),
+                    0);
+                int texIndex = (texY * tex.width + texX) * 4;
+                if (tex.data[texIndex + 3] < 128) return false;
+                fragColor = {
                   tex.data[texIndex] / 255.0f,
                   tex.data[texIndex + 1] / 255.0f,
                   tex.data[texIndex + 2] / 255.0f
@@ -1009,10 +1054,13 @@ int main(void) {
             [selected](Vertex v, Vec3f &fragColor) {
               Vec2f uv         = v.uv;
               const Image &tex = textures[1];
-              int texX         = static_cast<int>(v.uv[0] * (tex.width)) % tex.width;
-              int texY         = static_cast<int>(v.uv[1] * (tex.height)) % tex.height;
-              int texIndex     = (texY * tex.width + texX) * tex.channels;
-              fragColor        = {
+              int texX         = std::max(
+                  std::min(static_cast<int>(v.uv[0] * (tex.width)), tex.width - 1), 0);
+              int texY = std::max(
+                  std::min(static_cast<int>(v.uv[1] * (tex.height)), tex.height - 1), 0);
+              int texIndex = (texY * tex.width + texX) * 4;
+              if (tex.data[texIndex + 3] < 128) return false;
+              fragColor = {
                 tex.data[texIndex] / 255.0f,
                 tex.data[texIndex] / 255.0f,
                 tex.data[texIndex] / 255.0f,
@@ -1050,10 +1098,13 @@ int main(void) {
             vertexData,
             transformMatrix,
             [&tex, &light](Vertex v, Vec3f &fragColor) {
-              int texX     = static_cast<int>(v.uv[0] * (tex.width)) % tex.width;
-              int texY     = static_cast<int>(v.uv[1] * (tex.height)) % tex.height;
-              int texIndex = (texY * tex.width + texX) * tex.channels;
-              fragColor    = {
+              int texX = std::max(
+                  std::min(static_cast<int>(v.uv[0] * (tex.width)), tex.width - 1), 0);
+              int texY = std::max(
+                  std::min(static_cast<int>(v.uv[1] * (tex.height)), tex.height - 1), 0);
+              int texIndex = (texY * tex.width + texX) * 4;
+              if (tex.data[texIndex + 3] < 128) return false;
+              fragColor = {
                 tex.data[texIndex] / 255.0f,
                 tex.data[texIndex + 1] / 255.0f,
                 tex.data[texIndex + 2] / 255.0f
