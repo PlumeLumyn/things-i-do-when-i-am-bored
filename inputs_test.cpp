@@ -33,6 +33,7 @@ struct Image {
 
 struct BlockData {
     const Image &top, &left, &right, &front, &back, &bottom;
+    const bool transparent = false;
     const Image &operator[](const int id) const {
       switch (id) {
       case 0:
@@ -491,60 +492,67 @@ const std::array textures = {
 };
 const std::array blockDatas = {
   BlockData {
-             .top    = textures[0],
-             .left   = textures[0],
-             .right  = textures[0],
-             .front  = textures[0],
-             .back   = textures[0],
-             .bottom = textures[0],
+             .top         = textures[0],
+             .left        = textures[0],
+             .right       = textures[0],
+             .front       = textures[0],
+             .back        = textures[0],
+             .bottom      = textures[0],
+             .transparent = false,
              },
   BlockData {
-             .top    = textures[1],
-             .left   = textures[2],
-             .right  = textures[2],
-             .front  = textures[2],
-             .back   = textures[2],
-             .bottom = textures[3],
+             .top         = textures[1],
+             .left        = textures[2],
+             .right       = textures[2],
+             .front       = textures[2],
+             .back        = textures[2],
+             .bottom      = textures[3],
+             .transparent = false,
              },
   BlockData {
-             .top    = textures[3],
-             .left   = textures[3],
-             .right  = textures[3],
-             .front  = textures[3],
-             .back   = textures[3],
-             .bottom = textures[3],
+             .top         = textures[3],
+             .left        = textures[3],
+             .right       = textures[3],
+             .front       = textures[3],
+             .back        = textures[3],
+             .bottom      = textures[3],
+             .transparent = false,
              },
   BlockData {
-             .top    = textures[6],
-             .left   = textures[6],
-             .right  = textures[6],
-             .front  = textures[6],
-             .back   = textures[6],
-             .bottom = textures[6],
+             .top         = textures[6],
+             .left        = textures[6],
+             .right       = textures[6],
+             .front       = textures[6],
+             .back        = textures[6],
+             .bottom      = textures[6],
+             .transparent = false,
              },
   BlockData {
-             .top    = textures[5],
-             .left   = textures[4],
-             .right  = textures[4],
-             .front  = textures[4],
-             .back   = textures[4],
-             .bottom = textures[5],
+             .top         = textures[5],
+             .left        = textures[4],
+             .right       = textures[4],
+             .front       = textures[4],
+             .back        = textures[4],
+             .bottom      = textures[5],
+             .transparent = false,
              },
   BlockData {
-             .top    = textures[7],
-             .left   = textures[7],
-             .right  = textures[7],
-             .front  = textures[7],
-             .back   = textures[7],
-             .bottom = textures[7],
+             .top         = textures[7],
+             .left        = textures[7],
+             .right       = textures[7],
+             .front       = textures[7],
+             .back        = textures[7],
+             .bottom      = textures[7],
+             .transparent = false,
              },
   BlockData {
-             .top    = textures[8],
-             .left   = textures[8],
-             .right  = textures[8],
-             .front  = textures[8],
-             .back   = textures[8],
-             .bottom = textures[8],
+             .top         = textures[8],
+             .left        = textures[8],
+             .right       = textures[8],
+             .front       = textures[8],
+             .back        = textures[8],
+             .bottom      = textures[8],
+             .transparent = true,
              },
 };
 
@@ -822,7 +830,7 @@ int main(void) {
       for (const auto &block : chunk) {
         const Vec3i &blockChunkPosition = getBlockChunkPosition(block);
         blockGrid[blockChunkPosition[0]][blockChunkPosition[1]][blockChunkPosition[2]] =
-            true;
+            !blockDatas[block.id].transparent;
       }
       for (const auto &block : chunk) {
         modelMatrix[0][3]        = block.position[0];
@@ -893,13 +901,14 @@ int main(void) {
               blockGrid
                   [blockChunkPosition[0]][blockChunkPosition[1]][blockChunkPosition[2]])
             continue;
-          const Image &tex = blockDatas[block.id][k / 2];
-          float light      = DotProduct(Normalize(vertexData[0].normal), lightDir);
+          const Image &tex       = blockDatas[block.id][k / 2];
+          float light            = DotProduct(Normalize(vertexData[0].normal), lightDir);
+          const bool transparent = blockDatas[block.id].transparent;
           drawTriangle(
               sController.getWindow(windowId),
               vertexData,
               transformMatrix,
-              [&tex, &light](Vertex v, Vec3f &fragColor) {
+              [&tex, &light, transparent](Vertex v, Vec3f &fragColor) {
                 int texX = std::max(
                     std::min(static_cast<int>(v.uv[0] * (tex.width)), tex.width - 1), 0);
                 int texY = std::max(
