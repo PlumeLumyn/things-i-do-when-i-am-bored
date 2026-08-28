@@ -123,6 +123,13 @@ bool isPositionInChunk(const Vec3i &position) {
          position[1] < CHUNK_SIZE && position[2] >= 0 && position[2] < CHUNK_SIZE;
 }
 
+bool isBlockAt(ChunkCollection &collection, const Vec3i &position) {
+  for (auto &block : getChunkFromCollection(collection, position)) {
+    if (block.position == position) return true;
+  }
+  return false;
+}
+
 void addBlockToChunkCollection(ChunkCollection &collection, const Block &block) {
   getChunkFromCollection(
       collection,
@@ -555,6 +562,15 @@ const std::array blockDatas = {
              .transparent = true,
              },
 };
+enum class BlockType {
+  COBBLESTONE,
+  GRASS,
+  DIRT,
+  OAK_PLANKS,
+  OAK_LOG,
+  STONE,
+  LEAVES
+};
 
 const std::array blockDisplaces {
   Vec3i { 0,  0,  -1 },
@@ -573,24 +589,59 @@ int main(void) {
 
   for (int i = 0; i <= WORLD_WIDTH; i++)
     for (int j = 0; j <= WORLD_DEPTH; j++) {
-      Vec2f uv    = Vec2f { i / CLIFF_RADIUS, j / CLIFF_RADIUS };
-      float noise = snoise(uv);
-      float depth = noise * (CLIFF_PERCENT / 2.0f) + (1.0f - CLIFF_PERCENT / 2.0f);
+      Vec2f uv         = Vec2f { static_cast<float>(i), static_cast<float>(j) };
+      float noise      = snoise(uv / CLIFF_RADIUS);
+      float wood_noise = snoise(uv * 100.0f);
+      float depth      = noise * (CLIFF_PERCENT / 2.0f) + (1.0f - CLIFF_PERCENT / 2.0f);
       for (int z = 0; z < depth * WORLD_HEIGHT; z++) {
-        int id = 5;
+        BlockType type = BlockType::STONE;
 
         if (z + 1 >= depth * WORLD_HEIGHT) {
-          id = 1;
+          type = BlockType::GRASS;
         } else if (z + DIRT_SIZE >= depth * WORLD_HEIGHT) {
-          id = 2;
+          type = BlockType::DIRT;
         }
         addBlockToChunkCollection(
             chunks,
             {
-                id,
+                static_cast<int>(type),
                 Vec3i {
                        (i - WORLD_WIDTH / 2), (z - WORLD_HEIGHT), (j - WORLD_DEPTH / 2) }
         });
+      }
+    }
+
+  for (int i = 0; i <= WORLD_WIDTH; i++)
+    for (int j = 0; j <= WORLD_DEPTH; j++) {
+      Vec2f uv         = Vec2f { static_cast<float>(i), static_cast<float>(j) };
+      float noise      = snoise(uv / CLIFF_RADIUS);
+      float wood_noise = snoise(uv * 100.0f);
+      float depth      = noise * (CLIFF_PERCENT / 2.0f) + (1.0f - CLIFF_PERCENT / 2.0f);
+      if (wood_noise > 0.6f) {
+        // Draw semisphere of leaves
+        BlockType type = BlockType::OAK_LOG;
+        for (int z = 0; z < 4; z++) {
+          addBlockToChunkCollection(
+              chunks,
+              {
+                  static_cast<int>(type),
+                  Vec3i { (i - WORLD_WIDTH / 2),
+                         static_cast<int>((z - WORLD_HEIGHT + depth * WORLD_HEIGHT)),
+                         (j - WORLD_DEPTH / 2) }
+          });
+        }
+        type = BlockType::LEAVES;
+        for (int x = -2; x <= 2; x++)
+          for (int y = -2; y <= 2; y++)
+            for (int z = 0; z <= 3; z++) {
+              Vec3i position = Vec3i {
+                ((i + x) - WORLD_WIDTH / 2),
+                static_cast<int>((z - WORLD_HEIGHT + 2 + depth * WORLD_HEIGHT)),
+                ((j + y) - WORLD_DEPTH / 2)
+              };
+              if ((x * x + y * y + z * z) < 3.2f * 3.2f && !isBlockAt(chunks, position))
+                addBlockToChunkCollection(chunks, { static_cast<int>(type), position });
+            }
       }
     }
 
@@ -819,7 +870,7 @@ int main(void) {
               .size();
     }
     for (const auto &displace : displaces) {
-      std::array<std::array<std::array<bool, CHUNK_SIZE>, CHUNK_SIZE>, CHUNK_SIZE>
+      std::array<std::array<std::array<uint8_t, CHUNK_SIZE>, CHUNK_SIZE>, CHUNK_SIZE>
           blockGrid {};
       Chunk &chunk = getChunkFromCollection(
           chunks,
@@ -830,7 +881,7 @@ int main(void) {
       for (const auto &block : chunk) {
         const Vec3i &blockChunkPosition = getBlockChunkPosition(block);
         blockGrid[blockChunkPosition[0]][blockChunkPosition[1]][blockChunkPosition[2]] =
-            !blockDatas[block.id].transparent;
+            blockDatas[block.id].transparent ? 2 : 1;
       }
       for (const auto &block : chunk) {
         modelMatrix[0][3]        = block.position[0];
@@ -898,8 +949,9 @@ int main(void) {
           const Vec3i blockChunkPosition =
               getBlockChunkPosition(block) + blockDisplaces[k / 2];
           if (isPositionInChunk(blockChunkPosition) &&
-              blockGrid
-                  [blockChunkPosition[0]][blockChunkPosition[1]][blockChunkPosition[2]])
+              blockGrid[blockChunkPosition[0]][blockChunkPosition[1]]
+                       [blockChunkPosition[2]] ==
+                  (blockDatas[block.id].transparent ? 2 : 1))
             continue;
           const Image &tex       = blockDatas[block.id][k / 2];
           float light            = DotProduct(Normalize(vertexData[0].normal), lightDir);
