@@ -1,0 +1,3 @@
+# Hashes of file build rules.
+21cbb8533c53c9632aab75cec64849ee CMakeFiles/tuicraft_resources
+86ce6463bb8840d416bd57e7dec10e64 CMakeFiles/tuidash_resources

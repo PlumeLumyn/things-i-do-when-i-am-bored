@@ -1,0 +1,20 @@
+[
+{
+  "directory": "/home/picaultl/git/things-i-do-when-i-am-bored/build/Release",
+  "command": "/usr/bin/c++   -O3 -DNDEBUG -o CMakeFiles/tuicraft.dir/tuicraft/tuicraft.cpp.o -c /home/picaultl/git/things-i-do-when-i-am-bored/tuicraft/tuicraft.cpp",
+  "file": "/home/picaultl/git/things-i-do-when-i-am-bored/tuicraft/tuicraft.cpp",
+  "output": "CMakeFiles/tuicraft.dir/tuicraft/tuicraft.cpp.o"
+},
+{
+  "directory": "/home/picaultl/git/things-i-do-when-i-am-bored/build/Release",
+  "command": "/usr/bin/c++   -O3 -DNDEBUG -o CMakeFiles/tuidash.dir/tuidash/tuidash.cpp.o -c /home/picaultl/git/things-i-do-when-i-am-bored/tuidash/tuidash.cpp",
+  "file": "/home/picaultl/git/things-i-do-when-i-am-bored/tuidash/tuidash.cpp",
+  "output": "CMakeFiles/tuidash.dir/tuidash/tuidash.cpp.o"
+},
+{
+  "directory": "/home/picaultl/git/things-i-do-when-i-am-bored/build/Release",
+  "command": "/usr/bin/c++   -O3 -DNDEBUG -o CMakeFiles/snake.dir/snake/snake.cpp.o -c /home/picaultl/git/things-i-do-when-i-am-bored/snake/snake.cpp",
+  "file": "/home/picaultl/git/things-i-do-when-i-am-bored/snake/snake.cpp",
+  "output": "CMakeFiles/snake.dir/snake/snake.cpp.o"
+}
+]

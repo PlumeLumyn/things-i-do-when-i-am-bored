@@ -1,22 +1,23 @@
-#include "noise.hpp"
-#include "screen.hpp"
-#include <algorithm>
-#include <cstddef>
-#include <cstdint>
-#include <functional>
-#include <limits>
-#include <unordered_map>
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-#include "vec.hpp"
+#define INPUTS_HPP_IMPLEMENTATION
+#include "../external/stb_image.h"
+#include "../rtui/inputs.hpp"
+#include "../rtui/noise.hpp"
+#include "../rtui/path.hpp"
+#include "../rtui/screen.hpp"
+#include "../rtui/vec.hpp"
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <functional>
+#include <limits>
 #include <string>
-#define INPUTS_HPP_IMPLEMENTATION
-#include "inputs.hpp"
+#include <unordered_map>
 
 struct Vertex {
     Vec3f pos;
@@ -486,104 +487,118 @@ void drawTriangle(
   }
 }
 
-const std::array textures = {
-  loadTexture("./textures/cobblestone.png"),
-  loadTexture("./textures/grass_block_top.png"),
-  loadTexture("./textures/grass_block_side.png"),
-  loadTexture("./textures/dirt.png"),
-  loadTexture("./textures/oak_log.png"),
-  loadTexture("./textures/oak_log_top.png"),
-  loadTexture("./textures/oak_planks.png"),
-  loadTexture("./textures/stone.png"),
-  loadTexture("./textures/leaves.png"),
-};
-const std::array blockDatas = {
-  BlockData {
-             .top         = textures[0],
-             .left        = textures[0],
-             .right       = textures[0],
-             .front       = textures[0],
-             .back        = textures[0],
-             .bottom      = textures[0],
-             .transparent = false,
-             },
-  BlockData {
-             .top         = textures[1],
-             .left        = textures[2],
-             .right       = textures[2],
-             .front       = textures[2],
-             .back        = textures[2],
-             .bottom      = textures[3],
-             .transparent = false,
-             },
-  BlockData {
-             .top         = textures[3],
-             .left        = textures[3],
-             .right       = textures[3],
-             .front       = textures[3],
-             .back        = textures[3],
-             .bottom      = textures[3],
-             .transparent = false,
-             },
-  BlockData {
-             .top         = textures[6],
-             .left        = textures[6],
-             .right       = textures[6],
-             .front       = textures[6],
-             .back        = textures[6],
-             .bottom      = textures[6],
-             .transparent = false,
-             },
-  BlockData {
-             .top         = textures[5],
-             .left        = textures[4],
-             .right       = textures[4],
-             .front       = textures[4],
-             .back        = textures[4],
-             .bottom      = textures[5],
-             .transparent = false,
-             },
-  BlockData {
-             .top         = textures[7],
-             .left        = textures[7],
-             .right       = textures[7],
-             .front       = textures[7],
-             .back        = textures[7],
-             .bottom      = textures[7],
-             .transparent = false,
-             },
-  BlockData {
-             .top         = textures[8],
-             .left        = textures[8],
-             .right       = textures[8],
-             .front       = textures[8],
-             .back        = textures[8],
-             .bottom      = textures[8],
-             .transparent = true,
-             },
-};
-enum class BlockType {
-  COBBLESTONE,
-  GRASS,
-  DIRT,
-  OAK_PLANKS,
-  OAK_LOG,
-  STONE,
-  LEAVES
-};
-
-const std::array blockDisplaces {
-  Vec3i { 0,  0,  -1 },
-   Vec3i { 0,  0,  1  },
-   Vec3i { -1, 0,  0  },
-  Vec3i { 1,  0,  0  },
-   Vec3i { 0,  -1, 0  },
-   Vec3i { 0,  1,  0  },
-};
-
-ChunkCollection chunks;
-
 int main(void) {
+  try {
+    std::string executablePath = getExecutablePath();
+    std::cout << "Executable Path: " << executablePath << std::endl;
+
+    std::string directory = getDirectoryFromPath(executablePath);
+    std::cout << "Directory: " << directory << std::endl;
+
+    setCurrentWorkingDirectory(directory);
+    std::cout << "Current working directory set to: " << directory << std::endl;
+  } catch (const std::exception &e) {
+    std::cerr << "Error: " << e.what() << std::endl;
+    return EXIT_FAILURE;
+  }
+
+  const std::array textures = {
+    loadTexture("./resources/textures/cobblestone.png"),
+    loadTexture("./resources/textures/grass_block_top.png"),
+    loadTexture("./resources/textures/grass_block_side.png"),
+    loadTexture("./resources/textures/dirt.png"),
+    loadTexture("./resources/textures/oak_log.png"),
+    loadTexture("./resources/textures/oak_log_top.png"),
+    loadTexture("./resources/textures/oak_planks.png"),
+    loadTexture("./resources/textures/stone.png"),
+    loadTexture("./resources/textures/leaves.png"),
+  };
+  const std::array blockDatas = {
+    BlockData {
+               .top         = textures[0],
+               .left        = textures[0],
+               .right       = textures[0],
+               .front       = textures[0],
+               .back        = textures[0],
+               .bottom      = textures[0],
+               .transparent = false,
+               },
+    BlockData {
+               .top         = textures[1],
+               .left        = textures[2],
+               .right       = textures[2],
+               .front       = textures[2],
+               .back        = textures[2],
+               .bottom      = textures[3],
+               .transparent = false,
+               },
+    BlockData {
+               .top         = textures[3],
+               .left        = textures[3],
+               .right       = textures[3],
+               .front       = textures[3],
+               .back        = textures[3],
+               .bottom      = textures[3],
+               .transparent = false,
+               },
+    BlockData {
+               .top         = textures[6],
+               .left        = textures[6],
+               .right       = textures[6],
+               .front       = textures[6],
+               .back        = textures[6],
+               .bottom      = textures[6],
+               .transparent = false,
+               },
+    BlockData {
+               .top         = textures[5],
+               .left        = textures[4],
+               .right       = textures[4],
+               .front       = textures[4],
+               .back        = textures[4],
+               .bottom      = textures[5],
+               .transparent = false,
+               },
+    BlockData {
+               .top         = textures[7],
+               .left        = textures[7],
+               .right       = textures[7],
+               .front       = textures[7],
+               .back        = textures[7],
+               .bottom      = textures[7],
+               .transparent = false,
+               },
+    BlockData {
+               .top         = textures[8],
+               .left        = textures[8],
+               .right       = textures[8],
+               .front       = textures[8],
+               .back        = textures[8],
+               .bottom      = textures[8],
+               .transparent = true,
+               },
+  };
+  enum class BlockType {
+    COBBLESTONE,
+    GRASS,
+    DIRT,
+    OAK_PLANKS,
+    OAK_LOG,
+    STONE,
+    LEAVES
+  };
+
+  const std::array blockDisplaces {
+    Vec3i { 0,  0,  -1 },
+     Vec3i { 0,  0,  1  },
+     Vec3i { -1, 0,  0  },
+    Vec3i { 1,  0,  0  },
+     Vec3i { 0,  -1, 0  },
+     Vec3i { 0,  1,  0  },
+  };
+
+  ChunkCollection chunks;
+
   Inputs::InputController iController;
   Screen::ScreenController sController;
 
@@ -722,6 +737,8 @@ int main(void) {
   bool isJumping     = false; // Track if we're in a jump
   int jumpFrames     = 0;     // Track how long jump has been held
 
+  size_t windowId = sController.createWindow(0, 0, 0, 0);
+
   while (1) {
     auto frameStart = std::chrono::steady_clock::now();
 
@@ -804,7 +821,6 @@ int main(void) {
     //   pos[1] = 0.5f;
     // }
 
-    size_t windowId = sController.createWindow(0, 0, 0, 0);
     sController.getWindow(windowId).clear();
     const float NEAR_CLIP = 0.0001;
     const float FAR_CLIP  = 20.0;
@@ -1112,7 +1128,7 @@ int main(void) {
             sController.getWindow(windowId),
             vertexData,
             transformMatrix,
-            [selected](Vertex v, Vec3f &fragColor) {
+            [selected, &textures](Vertex v, Vec3f &fragColor) {
               Vec2f uv         = v.uv;
               const Image &tex = textures[1];
               int texX         = std::max(

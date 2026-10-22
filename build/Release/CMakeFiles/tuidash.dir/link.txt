@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/tuidash.dir/link.d CMakeFiles/tuidash.dir/tuidash/tuidash.cpp.o -o tuidash

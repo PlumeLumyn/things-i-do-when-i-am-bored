@@ -1,0 +1,97 @@
+{
+	"configurations" : 
+	[
+		{
+			"abstractTargets" : [],
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"jsonFile" : "directory-.-Release-9ad1a58d4644cf6543fa.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.10"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4
+					]
+				}
+			],
+			"name" : "Release",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "ThingsIDoWhenIAmBored",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2,
+						3,
+						4
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "snake::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-snake-Release-280aa845fb2abccc2116.json",
+					"name" : "snake",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "tuicraft::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-tuicraft-Release-bf7c6a41cb74aa50cac6.json",
+					"name" : "tuicraft",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "tuicraft_resources::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-tuicraft_resources-Release-f4bbe2586eea89eef34a.json",
+					"name" : "tuicraft_resources",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "tuidash::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-tuidash-Release-b883574fe92ec4bf5076.json",
+					"name" : "tuidash",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "tuidash_resources::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-tuidash_resources-Release-f512257814bd2ee7d460.json",
+					"name" : "tuidash_resources",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/picaultl/git/things-i-do-when-i-am-bored/build/Release",
+		"source" : "/home/picaultl/git/things-i-do-when-i-am-bored"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 9
+	}
+}

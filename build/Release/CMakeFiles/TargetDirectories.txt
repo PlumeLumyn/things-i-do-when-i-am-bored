@@ -1,0 +1,7 @@
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Release/CMakeFiles/tuicraft.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Release/CMakeFiles/tuicraft_resources.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Release/CMakeFiles/tuidash.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Release/CMakeFiles/tuidash_resources.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Release/CMakeFiles/snake.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Release/CMakeFiles/edit_cache.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Release/CMakeFiles/rebuild_cache.dir

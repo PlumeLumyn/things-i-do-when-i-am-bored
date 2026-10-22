@@ -1,0 +1,79 @@
+{
+	"configurations" : 
+	[
+		{
+			"abstractTargets" : [],
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"jsonFile" : "directory-.-Debug-9ad1a58d4644cf6543fa.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.10"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "ThingsIDoWhenIAmBored",
+					"targetIndexes" : 
+					[
+						0,
+						1,
+						2
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "snake::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-snake-Debug-67ed13f65459e2a2913f.json",
+					"name" : "snake",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "tuicraft::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-tuicraft-Debug-01250001b8f76310a45c.json",
+					"name" : "tuicraft",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "tuicraft_resources::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-tuicraft_resources-Debug-3791f50edebe152b5776.json",
+					"name" : "tuicraft_resources",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "/home/picaultl/git/things-i-do-when-i-am-bored/build/Debug",
+		"source" : "/home/picaultl/git/things-i-do-when-i-am-bored"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 9
+	}
+}

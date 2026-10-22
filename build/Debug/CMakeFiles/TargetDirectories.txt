@@ -1,0 +1,5 @@
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Debug/CMakeFiles/tuicraft.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Debug/CMakeFiles/tuicraft_resources.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Debug/CMakeFiles/snake.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Debug/CMakeFiles/edit_cache.dir
+/home/picaultl/git/things-i-do-when-i-am-bored/build/Debug/CMakeFiles/rebuild_cache.dir
